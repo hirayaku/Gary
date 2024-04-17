@@ -20,13 +20,13 @@ TEST(RadixSortTest, Handles32bit) {
   std::vector<uint32_t> unsorted(size);
   std::iota(unsorted.begin(), unsorted.end(), 0);
 
-  const auto indices = utils::radixSortInplacePar(unsorted);
+  const auto indices = utils::radixArgSortInplacePar(unsorted);
   checkSorted(unsorted);
 
   std::vector<uint32_t> copy(size);
   std::reverse_copy(unsorted.begin(), unsorted.end(), copy.begin());
 
-  utils::radixSortInplacePar(copy);
+  utils::radixArgSortInplacePar(copy);
   checkSorted(copy);
 }
 
@@ -39,7 +39,7 @@ TEST(RadixSortTest, HandlesRandom32bit) {
   std::generate(unsorted.begin(), unsorted.end(), [&]() { return dist(gen); });
 
   std::vector<uint32_t> copy(unsorted);
-  const auto indices = utils::radixSortInplacePar(copy);
+  utils::radixArgSortInplacePar(copy);
   checkSorted(copy);
 }
 
@@ -49,6 +49,6 @@ TEST(RadixSortTest, Handles64bit) {
   std::iota(unsorted.begin(), unsorted.end(), 0);
   std::for_each(unsorted.begin(), unsorted.end(), [](auto &a) { a = size - a; });
   std::vector<uint64_t> copy(unsorted);
-  const auto indices = utils::radixSortInplacePar(copy);
+  utils::radixArgSortInplacePar(copy);
   checkSorted(copy);
 }

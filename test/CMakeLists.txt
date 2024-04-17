@@ -5,6 +5,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG main
 )
+set(BUILD_GMOCK OFF)
 FetchContent_MakeAvailable(googletest)
 
 include(GoogleTest)

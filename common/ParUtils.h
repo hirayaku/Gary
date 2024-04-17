@@ -3,13 +3,13 @@
 
 namespace utils {
 template <typename T>
-inline void atomic_add(T &obj, const T &val) {
+inline void atomicAdd(T &obj, const T &val) {
     #pragma omp atomic update
     obj += val;
 }
 
 template <typename T>
-inline void atomic_add(T &obj, const T &val, T &out) {
+inline void atomicAdd(T &obj, const T &val, T &out) {
     #pragma omp atomic capture
     {
         out = obj;

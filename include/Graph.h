@@ -4,6 +4,10 @@
 #include <tuple>
 #include <memory>
 #include <type_traits>
+#include <fstream>
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/vector.hpp>
 #include "Defines.h"
 #include "Utils.h"
 
@@ -12,6 +16,15 @@
 // 1. COO <--> CSR <--> CSC
 // 2. Partitioning
 
+enum SerDesVersion {
+  V1 = 1,
+};
+
+enum GraphFormat {
+  CSR,
+  COO,
+};
+
 class GraphCSR;
 
 class GraphCOO {
@@ -19,6 +32,7 @@ public:
   using VType = vidT;
   using VRange = utils::IdRange<vidT>;
   using EType = std::tuple<vidT, vidT>;
+  static constexpr auto format = GraphFormat::COO;
 
   vidT numV() const { return m; }
   eidT numE() const { return nnz; }
@@ -75,11 +89,26 @@ public:
     return GraphCOO(m, nnz, col, row);
   }
 
+  // convert graph COO to CSR
   GraphCSR toCSR() const;
 
-  static GraphCSR load(std::string binFileName);
+  // serialization with cereal
+  template <class Archive>
+  void save(Archive &archive) const {
+    archive(SerDesVersion::V1, format, m, nnz, row, col);
+  }
 
-  static void save(std::string binFileName);
+  // deserialization with cereal
+  template <class Archive>
+  void load(Archive &archive) {
+    SerDesVersion version;
+    GraphFormat load_format;
+    archive(version, load_format);
+    std::cout << "Version:" << version << std::endl;
+    if (load_format != format)
+      throw cereal::Exception("Incompatible format: attempting to deserialize non-COO binary into GraphCOO");
+    archive(m, nnz, row, col);
+  }
 
 protected:
   vidT m = 0;
@@ -93,11 +122,12 @@ public:
   using VType = vidT;
   using VRange = utils::IdRange<VType>;
   using EType = std::tuple<vidT, vidT>;
+  static constexpr auto format = GraphFormat::CSR;
 
   vidT numV() const { return m; }
   eidT numE() const { return nnz; }
-  vidT getDegree(vidT v) const { return ptr->at(v+1) - ptr->at(v); } 
-  const auto &getDegree() const { return *ptr; }
+  vidT getDegree(vidT v) const { return deg->at(v); }
+  const auto &getDegreeAll() const { return *deg; }
   // vid: the source vertex ID of the requested edge
   // eno: the index of the edge in the adjacency list of vid; requires 0 <= eno < degree(vid)
   EType getEdge(vidT vid, vidT eno = 0) const { return {vid, idx->at(ptr->at(vid)+eno)}; }
@@ -158,38 +188,74 @@ public:
 
   ERange adjBetween(vidT v1, vidT v2) const { return ERange(*this, v1, v2); }
 
-  auto N(vidT vid) const {
-    return utils::Span<std::vector<vidT>::const_iterator>(
-      idx->begin() + ptr->at(vid), this->getDegree(vid));
-  }
+  // get neighbors of node `vid`
+  utils::Span<std::vector<vidT>::const_iterator> N(vidT vid) const;
 
   GraphCSR() = default;
 
   template <typename RowPtrT, typename ColIdxT>
   GraphCSR(vidT m, eidT nnz, RowPtrT ptr, ColIdxT idx)
-  : m(m), nnz(nnz), ptr(ptr), idx(idx) {}
+  : m(m), nnz(nnz), ptr(ptr), idx(idx) {
+    this->deg = std::make_shared<std::vector<vidT>>(numV());
+    std::transform(ptr->begin()+1, ptr->end(), ptr->begin(), deg->begin(), std::minus<eidT>());
+  }
 
   const std::vector<eidT> &getPtr() const { return *ptr; }
 
   const std::vector<vidT> &getIdx() const { return *idx; }
 
+  // reverse the direction of edges
   void reverse_();
 
-  GraphCSR reverse();
+  // CSR -> CSC
+  GraphCSR reverse() const;
 
+  // CSR -> COO
   GraphCOO toCOO() const;
 
-  static GraphCSR load(std::string binFileName);
+  // serialization with cereal
+  template <class Archive>
+  void save(Archive &archive) const {
+    archive(SerDesVersion::V1, format, m, nnz, ptr, idx, deg);
+  }
 
-  static void save(std::string binFileName);
+  // deserialization with cereal
+  template <class Archive>
+  void load(Archive &archive) {
+    SerDesVersion version;
+    GraphFormat load_format;
+    archive(version, load_format);
+    if (load_format != format)
+      throw cereal::Exception("Incompatible format: attempting to deserialize non-CSR binary into GraphCSR");
+    archive(m, nnz, ptr, idx, deg);
+  }
 
 protected:
   vidT m = 0;
   eidT nnz = 0;
   std::shared_ptr<std::vector<eidT>> ptr;
   std::shared_ptr<std::vector<vidT>> idx;
+  std::shared_ptr<std::vector<vidT>> deg;
 };
 
-// load graph from SNAP text format
+// load graph from the binary file
+template <class GraphT>
+GraphT loadFromBinary(std::string binFileName) {
+  GraphT graph;
+  std::ifstream input(binFileName, std::ios::binary);
+  cereal::BinaryInputArchive iarchive(input);
+  iarchive(graph);
+  return graph;
+}
+
+// save graph to the binary file
+template <class GraphT>
+void saveToBinary(const GraphT &graph, std::string binFileName) {
+  std::ofstream output(binFileName, std::ios::binary);
+  cereal::BinaryOutputArchive oarchive(output);
+  oarchive(graph);
+}
+
+// load graph datasets from SNAP: https://snap.stanford.edu/data/index.html
 // assuming vertex ids start consecutively from 0
 GraphCOO loadFromSNAP(std::string txtFileName);

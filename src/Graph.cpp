@@ -12,15 +12,88 @@ GraphCOO::ERange::ERange(const GraphCOO &graph, eidT minId, eidT maxId)
 : row(*graph.row), col(*graph.col), min(minId), max(maxId)
 {
   if (minId > maxId || minId < 0 || maxId > graph.numE())
-  throw std::runtime_error(
-    fmt::format("Invalid edge range ({}, {})", minId, maxId)
+    throw std::invalid_argument(
+      fmt::format("Invalid edge range ({}, {})", minId, maxId)
+    );
+}
+
+GraphCSR GraphCOO::toCSR() const {
+  std::vector<std::make_unsigned_t<vidT>> newrow(numE());
+  std::vector<vidT> newcol(*col);
+  std::copy(this->row->begin(), this->row->end(), newrow.begin());
+  std::copy(this->col->begin(), this->col->end(), newcol.begin());
+
+  std::tie(newrow, newcol) = utils::radixSortInplacePar(newrow, newcol);
+
+  std::vector<vidT> degreeTable(numV());
+  std::vector<eidT> rowptr(numV()+1);
+  #pragma omp parallel for
+  for (size_t ei = 0; ei < newrow.size(); ++ei) {
+    utils::atomicAdd(degreeTable[newrow[ei]], 1);
+  }
+  utils::prefixSumPar(numV(), degreeTable.data(), rowptr.data());
+  assert(rowptr[numV()] == numE());
+
+  #pragma omp parallel for
+  for (vidT vi = 0; vi < numV(); ++vi) {
+    std::sort(&newcol[rowptr[vi]], &newcol[rowptr[vi+1]]);
+  }
+
+  return GraphCSR(
+    numV(), numE(),
+    std::make_shared<std::vector<eidT>>(std::move(rowptr)),
+    std::make_shared<std::vector<vidT>>(std::move(newcol))
   );
+}
+
+GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vid)
+: rawPtr(*graph.ptr), rawIdx(*graph.idx)
+{
+  if (vid < 0 || vid >= graph.m)
+    throw std::invalid_argument(fmt::format("Invalid vertex %ld", vid));
+  this->vidMin = vid;
+  this->vidMax = vid + 1;
+  this->eidMax = rawPtr[vidMax];
+}
+
+GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vidMin, vidT vidMax)
+: rawPtr(*graph.ptr), rawIdx(*graph.idx)
+{
+  if (vidMin > vidMax || vidMin < 0 || vidMax >= graph.m)
+    throw std::invalid_argument(fmt::format("Invalid vertices %ld, %ld", vidMin, vidMax));
+  this->vidMin = vidMin;
+  this->vidMax = vidMax;
+  this->eidMax = rawPtr[vidMax];
+}
+
+utils::Span<std::vector<vidT>::const_iterator> GraphCSR::N(vidT vid) const {
+  // return ERange(*this, vid);
+  return utils::Span<std::vector<vidT>::const_iterator>(
+    idx->begin() + ptr->at(vid), deg->operator[](vid));
+}
+
+void GraphCSR::reverse_() {}
+
+GraphCOO GraphCSR::toCOO() const {
+    std::vector<vidT> row(this->numE());
+    auto numV = this->numV();
+    auto &ptr = *this->ptr;
+
+    #pragma omp parallel for
+    for (vidT v = 0; v < numV; ++v) {
+      std::fill(row.begin()+ptr[v], row.begin()+ptr[v+1], v);
+    }
+
+    return GraphCOO(
+        numV, this->numE(),
+        std::make_shared<std::vector<vidT>>(std::move(row)), this->idx
+    );
 }
 
 GraphCOO loadFromSNAP(std::string txtFileName) {
   FILE *fp = fopen(txtFileName.data(), "r");
   if (fp == nullptr)
-    throw std::runtime_error(fmt::format("Invalid SNAP file: {}", txtFileName));
+    throw std::logic_error(fmt::format("Invalid SNAP file: {}", txtFileName));
 
   vidT maxId = 0;
   std::vector<vidT> row, col;
@@ -54,72 +127,5 @@ GraphCOO loadFromSNAP(std::string txtFileName) {
   return GraphCOO(numVertex, numEdge,
     std::make_shared<std::vector<vidT>>(std::move(row)),
     std::make_shared<std::vector<vidT>>(std::move(col))
-    );
-}
-
-GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vid)
-: rawPtr(*graph.ptr), rawIdx(*graph.idx)
-{
-  if (vid < 0 || vid >= graph.m)
-  throw std::runtime_error(fmt::format("Invalid vertex %ld", vid));
-  this->vidMin = vid;
-  this->vidMax = vid + 1;
-  this->eidMax = rawPtr[vidMax];
-}
-
-GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vidMin, vidT vidMax)
-// : rawPtr(graph.getPtr()), rawIdx(graph.getIdx())
-: rawPtr(*graph.ptr), rawIdx(*graph.idx)
-{
-  if (vidMin > vidMax || vidMin < 0 || vidMax >= graph.m)
-  throw std::runtime_error(fmt::format("Invalid vertices %ld, %ld", vidMin, vidMax));
-  this->vidMin = vidMin;
-  this->vidMax = vidMax;
-  this->eidMax = rawPtr[vidMax];
-}
-
-GraphCSR GraphCOO::toCSR() const {
-  std::vector<std::make_unsigned_t<vidT>> row(this->row->size());
-  std::copy(this->row->begin(), this->row->end(), row.begin());
-
-  std::vector<int64_t> indices;
-  std::tie(row, indices) = utils::radixSortInplacePar(row);
-
-  std::vector<vidT> degreeTable(numV());
-  std::vector<eidT> rowptr(numV()+1);
-  #pragma omp parallel for
-  for (size_t ei = 0; ei < row.size(); ++ei) {
-    utils::atomic_add(degreeTable[row[ei]], 1);
-  }
-  utils::prefixSumPar(numV(), degreeTable.data(), rowptr.data());
-  assert(rowptr[numV()] == numE());
-
-  const auto &col(*this->col);
-  std::vector<vidT> newcol(this->numE());
-  #pragma omp parallel for
-  for(size_t i = 0; i < indices.size(); ++i) {
-    newcol[i] = col[indices[i]];
-  }
-
-  return GraphCSR(
-    numV(), numE(),
-    std::make_shared<std::vector<eidT>>(std::move(rowptr)),
-    std::make_shared<std::vector<vidT>>(std::move(newcol))
-  );
-}
-
-GraphCOO GraphCSR::toCOO() const {
-    std::vector<vidT> row(this->numE());
-    auto numV = this->numV();
-    auto &ptr = this->getDegree();
-
-    #pragma omp parallel for
-    for (vidT v = 0; v < numV; ++v) {
-      std::fill(row.begin()+ptr[v], row.begin()+ptr[v+1], v);
-    }
-
-    return GraphCOO(
-        numV, this->numE(),
-        std::make_shared<std::vector<vidT>>(std::move(row)), this->idx
     );
 }

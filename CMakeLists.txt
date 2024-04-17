@@ -11,19 +11,25 @@ find_package(CUDAToolkit REQUIRED)
 find_package(OpenMP REQUIRED)
 # find_package(spdlog REQUIRED)
 
-add_executable(main main.cu src/Graph.cpp common/Utils.cpp)
-target_include_directories(main PUBLIC include common)
-target_link_libraries(main PUBLIC CUDA::cudart CUDA::nvToolsExt CUB::CUB rmm::rmm)
-target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX fmt::fmt)
-# target_link_libraries(main PUBLIC spdlog::spdlog_header_only)
-
-target_compile_features(main PUBLIC cxx_std_17 cuda_std_17)
-target_compile_options(main PRIVATE
+add_library(graphm SHARED src/Graph.cpp)
+target_include_directories(graphm PUBLIC include common)
+target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX fmt::fmt cereal::cereal)
+target_compile_features(graphm PUBLIC cxx_std_17 cuda_std_17)
+target_compile_options(graphm PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall>
   $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fopenmp,-Wall>
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:DEBUG>>:-G>
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RELWITHDEBINFO>>:-lineinfo>
 )
+
+add_executable(convert convert.cpp)
+target_link_libraries(convert PUBLIC graphm)
+target_compile_features(convert PUBLIC cxx_std_17 cuda_std_17)
+
+add_executable(main main.cu common/Utils.cpp)
+target_link_libraries(main PUBLIC CUDA::cudart CUDA::nvToolsExt CUB::CUB rmm::rmm)
+target_link_libraries(main PUBLIC graphm)
+target_compile_features(main PUBLIC cxx_std_17 cuda_std_17)
 
 add_subdirectory(thirdparty)
 add_subdirectory(test)

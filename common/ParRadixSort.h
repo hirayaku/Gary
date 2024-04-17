@@ -11,9 +11,9 @@
 #include <cassert>
 #include <cstdint>
 #include <utility>
+#include <stdexcept>
 
 #if !defined(_OPENMP)
-#include <stdexcept>
 
 namespace utils {
 
@@ -258,36 +258,52 @@ std::pair<K*, V*> radix_sort_parallel(K* inp_key_buf,
                               : std::make_pair(tmp_key_buf, tmp_value_buf));
 }
 
+// parallel in-place radix sort with an auxiliary array
+template <typename K, typename V>
+std::tuple<std::vector<K>, std::vector<V>> radixSortInplacePar(
+  std::vector<K> &input, std::vector<V> &aux,
+  const std::optional<K> max = std::nullopt
+) {
+  static_assert(std::is_unsigned_v<K>, "radixSort supports only unsigned intergral types");
+  const auto elements = input.size();
+  if (elements != aux.size())
+    throw std::invalid_argument("inputs to radix sort are of different sizes");
+  if (elements == 0) return {input, aux};
+
+  K *sorted_keys = nullptr;
+  V *sorted_vals = nullptr;
+  std::vector<K> tmp_keys(input.size());
+  std::vector<V> tmp_vals(input.size());
+
+  const auto maximum = max.value_or(*std::max_element(input.begin(), input.end()));
+  std::tie(sorted_keys, sorted_vals) = radix_sort_parallel(
+    input.data(), aux.data(),
+    tmp_keys.data(), tmp_vals.data(),
+    elements, maximum
+  );
+  const bool sorted_in_place = input.data() == sorted_keys;
+  if (!sorted_in_place) {
+    // std::copy(sorted_vals, sorted_vals + elements, input.begin());
+    // std::copy(sorted_indices, sorted_indices + elements, indices.begin());
+    std::swap(input, tmp_keys);
+    std::swap(aux, tmp_vals);
+  }
+  return {input, aux};
+}
+
 // parallel in-place radix arg-sort
-template <typename K>
-std::tuple<std::vector<K>, std::vector<int64_t>> radixSortInplacePar(
+template <typename K, typename IdxT=int64_t>
+std::tuple<std::vector<K>, std::vector<IdxT>> radixArgSortInplacePar(
   std::vector<K> &input,
   const std::optional<K> max = std::nullopt
 ) {
   static_assert(std::is_unsigned_v<K>, "radixSort supports only unsigned intergral types");
   const auto elements = input.size();
-  std::vector<int64_t> indices(elements);
+  std::vector<IdxT> indices(elements);
   std::iota(indices.begin(), indices.end(), 0);
-  if (elements == 0) return {input, indices};
-
-  K *sorted_vals = nullptr;
-  int64_t *sorted_indices = nullptr;
-  std::vector<K> tmp_vals(input.size());
-  std::vector<int64_t> tmp_indices(input.size());
-
-  const auto maximum = max.value_or(*std::max_element(input.begin(), input.end()));
-  std::tie(sorted_vals, sorted_indices) = radix_sort_parallel(
-    input.data(), indices.data(),
-    tmp_vals.data(), tmp_indices.data(),
-    elements, maximum
-  );
-  const bool sorted_in_place = input.data() == sorted_vals;
-  if (!sorted_in_place) {
-    std::copy(sorted_vals, sorted_vals + elements, input.begin());
-    std::copy(sorted_indices, sorted_indices + elements, indices.begin());
-  }
-  return {input, indices};
+  return radixSortInplacePar<K, IdxT>(input, indices, max);
 }
+
 
 }  // namespace utils
 

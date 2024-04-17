@@ -1,9 +1,8 @@
 #include <iostream>
 #include <cassert>
 #include <string>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/random.h>
+#include <stdexcept>
+#include <algorithm>
 #include <fmt/format.h>
 #include "HelperString.h"
 #include "HelperCUDA.h"
@@ -29,22 +28,14 @@ void cudaSetup(int deviceId, bool verbose) {
   }
 }
 
-
-
 int main(int argc, const char *argv[])
 {
-  // int deviceCount = 0;
-  // checkCudaErrors(cudaGetDeviceCount(&deviceCount));
-  // assert(deviceCount > 0 && "No GPU device found!");
-  // int deviceId = getCmdLineArgumentInt(argc, argv, "device=");
-  // bool verbose = getCmdLineArgumentInt(argc, argv, "verbose=") != 0;
-  // cudaSetup(deviceId, verbose);
-
-  char *filename = nullptr;
-  getCmdLineArgumentString(argc, argv, "input", &filename);
-
-  GraphCOO graph = loadFromSNAP(std::string(filename));
-  std::cout << fmt::format("{}: {} nodes, {} edges\n", filename, graph.numV(), graph.numE());
+  int deviceCount = 0;
+  checkCudaErrors(cudaGetDeviceCount(&deviceCount));
+  assert(deviceCount > 0 && "No GPU device found!");
+  int deviceId = getCmdLineArgumentInt(argc, argv, "device=");
+  bool verbose = getCmdLineArgumentInt(argc, argv, "verbose=") != 0;
+  cudaSetup(deviceId, verbose);
 
   return 0;
 }
