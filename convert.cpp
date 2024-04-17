@@ -13,10 +13,14 @@ void convertSNAP2Bin(std::string input, std::string output) {
   saveToBinary(graph, output);
 }
 
-void convertCOO2CSR(std::string input, std::string output) {
+void convertCOO2CSR(std::string input, std::string output, bool unsymmetrize) {
   GraphCOO graph = loadFromBinary<GraphCOO>(input);
   std::cout << fmt::format("{}: {} nodes, {} edges\n", input, graph.numV(), graph.numE());
-  GraphCSR csr = graph.toCSR();
+
+  if (unsymmetrize)
+    graph = graph.unsymmetrize();
+
+  GraphCSR csr = graph.toCSR_();
   auto &degrees = csr.getDegreeAll();
   auto dmax = *std::max_element(degrees.begin(), degrees.end());
   saveToBinary(csr, output);
@@ -72,7 +76,7 @@ int main(int argc, const char *argv[])
   if (convert == choices[0]) {
     convertSNAP2Bin(input, output);
   } else if (convert == choices[1]) {
-    convertCOO2CSR(input, output);
+    convertCOO2CSR(input, output, true /*unsymmetrize*/);
   } else {
     convertCSR2CSC(input, output);
   }

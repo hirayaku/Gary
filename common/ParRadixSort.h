@@ -214,7 +214,7 @@ bool inline is_radix_sort_available() {
 }
 
 // radix_sort only support unsigned intergral types.
-// TODO: add support for general integral types
+// FIXME: add support for general integral types
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(K* inp_key_buf,
                                       V* inp_value_buf,
@@ -260,11 +260,11 @@ std::pair<K*, V*> radix_sort_parallel(K* inp_key_buf,
 
 // parallel in-place radix sort with an auxiliary array
 template <typename K, typename V>
-std::tuple<std::vector<K>, std::vector<V>> radixSortInplacePar(
+std::tuple<std::vector<K>&, std::vector<V>&> radixSortInplacePar(
   std::vector<K> &input, std::vector<V> &aux,
   const std::optional<K> max = std::nullopt
 ) {
-  static_assert(std::is_unsigned_v<K>, "radixSort supports only unsigned intergral types");
+  static_assert(std::is_integral_v<K>, "radixSort supports only unsigned intergral types");
   const auto elements = input.size();
   if (elements != aux.size())
     throw std::invalid_argument("inputs to radix sort are of different sizes");
@@ -293,15 +293,16 @@ std::tuple<std::vector<K>, std::vector<V>> radixSortInplacePar(
 
 // parallel in-place radix arg-sort
 template <typename K, typename IdxT=int64_t>
-std::tuple<std::vector<K>, std::vector<IdxT>> radixArgSortInplacePar(
+std::tuple<std::vector<K>&, std::vector<IdxT>> radixArgSortInplacePar(
   std::vector<K> &input,
   const std::optional<K> max = std::nullopt
 ) {
-  static_assert(std::is_unsigned_v<K>, "radixSort supports only unsigned intergral types");
+  static_assert(std::is_integral_v<K>, "radixSort supports only unsigned intergral types");
   const auto elements = input.size();
   std::vector<IdxT> indices(elements);
   std::iota(indices.begin(), indices.end(), 0);
-  return radixSortInplacePar<K, IdxT>(input, indices, max);
+  radixSortInplacePar<K, IdxT>(input, indices, max);
+  return {input, std::move(indices)};
 }
 
 

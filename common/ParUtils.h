@@ -2,14 +2,14 @@
 #include "omp.h"
 
 namespace utils {
-template <typename T>
-inline void atomicAdd(T &obj, const T &val) {
+template <typename T, typename S>
+inline void atomicAdd(T &obj, const S &val) {
     #pragma omp atomic update
     obj += val;
 }
 
-template <typename T>
-inline void atomicAdd(T &obj, const T &val, T &out) {
+template <typename T, typename S>
+inline void atomicAdd(T &obj, const S &val, T &out) {
     #pragma omp atomic capture
     {
         out = obj;

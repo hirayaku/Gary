@@ -25,6 +25,14 @@ enum GraphFormat {
   COO,
 };
 
+class Some {
+private:
+  std::string str;
+public:
+  Some(std::string s): str(std::move(s)) {}
+  ~Some() { std::cout << "Destroyed: " << str << std::endl; }
+};
+
 class GraphCSR;
 
 class GraphCOO {
@@ -33,6 +41,7 @@ public:
   using VRange = utils::IdRange<vidT>;
   using EType = std::tuple<vidT, vidT>;
   static constexpr auto format = GraphFormat::COO;
+  static int id;
 
   vidT numV() const { return m; }
   eidT numE() const { return nnz; }
@@ -77,19 +86,39 @@ public:
   GraphCOO() = default;
 
   template <typename RowT, typename ColT>
-  GraphCOO(vidT m, eidT nnz, RowT row, ColT col)
-  : m(m), nnz(nnz), row(row), col(col)
+  GraphCOO(vidT m, eidT nnz, RowT &&row, ColT &&col)
+  : m(m), nnz(nnz), row(std::forward<RowT>(row)), col(std::forward<ColT>(col))
   {}
 
+  // template <typename RowT, typename ColT,
+  //           std::enable_if_t<is_shared_ptr<RowT>::value, bool> = false,
+  //           std::enable_if_t<is_shared_ptr<ColT>::value, bool> = false>
+  // GraphCOO(vidT m, eidT nnz, RowT &&row, ColT &&col) 
+  // : m(m), nnz(nnz),
+  //   row(std::make_shared<std::vector<vidT>>(std::forward<RowT>(row))),
+  //   col(std::make_shared<std::vector<vidT>>(std::forward<ColT>(col)))
+  // {}
+
+  // reverse the direction of edges
   void reverse_() {
     std::swap(row, col);
   }
 
+  // reverse the direction of edges
   GraphCOO reverse() const {
     return GraphCOO(m, nnz, col, row);
   }
 
-  // convert graph COO to CSR
+  // For each (u,v), create a copy of (v,u)
+  // - for a directed graph, this produces an undirected graph
+  // - for an undirected symmetrized graph, this produces an unsymmetrized copy 
+  // - for an undirected unsymmetrized graph, this operation is invalid
+  GraphCOO unsymmetrize() const;
+
+  // convert graph COO to CSR (affects COO)
+  GraphCSR toCSR_();
+
+  // convert graph COO to CSR (immutable)
   GraphCSR toCSR() const;
 
   // serialization with cereal
@@ -194,10 +223,11 @@ public:
   GraphCSR() = default;
 
   template <typename RowPtrT, typename ColIdxT>
-  GraphCSR(vidT m, eidT nnz, RowPtrT ptr, ColIdxT idx)
-  : m(m), nnz(nnz), ptr(ptr), idx(idx) {
+  GraphCSR(vidT m, eidT nnz, RowPtrT &&ptr, ColIdxT &&idx)
+  : m(m), nnz(nnz), ptr(std::forward<RowPtrT>(ptr)), idx(std::forward<ColIdxT>(idx)) {
     this->deg = std::make_shared<std::vector<vidT>>(numV());
-    std::transform(ptr->begin()+1, ptr->end(), ptr->begin(), deg->begin(), std::minus<eidT>());
+    std::transform(this->ptr->begin()+1, this->ptr->end(), this->ptr->begin(),
+      this->deg->begin(), std::minus<eidT>());
   }
 
   const std::vector<eidT> &getPtr() const { return *ptr; }
@@ -209,6 +239,12 @@ public:
 
   // CSR -> CSC
   GraphCSR reverse() const;
+
+  // For each (u,v), create a copy of (v,u)
+  // - for a directed graph, this produces an undirected graph
+  // - for an undirected symmetrized graph, this produces an unsymmetrized copy 
+  // - for an undirected unsymmetrized graph, this operation is invalid
+  GraphCSR unsymmetrize() const;
 
   // CSR -> COO
   GraphCOO toCOO() const;

@@ -17,33 +17,51 @@ GraphCOO::ERange::ERange(const GraphCOO &graph, eidT minId, eidT maxId)
     );
 }
 
-GraphCSR GraphCOO::toCSR() const {
-  std::vector<std::make_unsigned_t<vidT>> newrow(numE());
-  std::vector<vidT> newcol(*col);
+GraphCOO GraphCOO::unsymmetrize() const {
+  GraphCOO cooT = this->reverse();
+  std::vector<vidT> newrow(numE() * 2);
+  std::vector<vidT> newcol(numE() * 2);
   std::copy(this->row->begin(), this->row->end(), newrow.begin());
   std::copy(this->col->begin(), this->col->end(), newcol.begin());
+  std::copy(cooT.row->begin(), cooT.row->end(), newrow.begin()+numE());
+  std::copy(cooT.col->begin(), cooT.col->end(), newcol.begin()+numE());
+  return GraphCOO(
+    numV(), numE() * 2,
+    std::make_shared<std::vector<vidT>>(std::move(newrow)),
+    std::make_shared<std::vector<vidT>>(std::move(newcol))
+  );
+}
 
-  std::tie(newrow, newcol) = utils::radixSortInplacePar(newrow, newcol);
+GraphCSR GraphCOO::toCSR_()  {
+  utils::radixSortInplacePar(*row, *col);
 
   std::vector<vidT> degreeTable(numV());
   std::vector<eidT> rowptr(numV()+1);
   #pragma omp parallel for
-  for (size_t ei = 0; ei < newrow.size(); ++ei) {
-    utils::atomicAdd(degreeTable[newrow[ei]], 1);
+  for (size_t ei = 0; ei < row->size(); ++ei) {
+    utils::atomicAdd(degreeTable[row->at(ei)], 1);
   }
   utils::prefixSumPar(numV(), degreeTable.data(), rowptr.data());
   assert(rowptr[numV()] == numE());
 
   #pragma omp parallel for
   for (vidT vi = 0; vi < numV(); ++vi) {
-    std::sort(&newcol[rowptr[vi]], &newcol[rowptr[vi+1]]);
+    std::sort(col->begin() + rowptr[vi], col->begin() + rowptr[vi+1]);
   }
 
   return GraphCSR(
     numV(), numE(),
-    std::make_shared<std::vector<eidT>>(std::move(rowptr)),
-    std::make_shared<std::vector<vidT>>(std::move(newcol))
+    std::make_shared<std::vector<eidT>>(std::move(rowptr)), col
   );
+}
+
+GraphCSR GraphCOO::toCSR() const {
+  GraphCOO coo {
+    numV(), numE(),
+    std::make_shared<std::vector<vidT>>(*this->row),
+    std::make_shared<std::vector<vidT>>(*this->col)
+  };
+  return coo.toCSR_();
 }
 
 GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vid)
@@ -72,7 +90,18 @@ utils::Span<std::vector<vidT>::const_iterator> GraphCSR::N(vidT vid) const {
     idx->begin() + ptr->at(vid), deg->operator[](vid));
 }
 
-void GraphCSR::reverse_() {}
+void GraphCSR::reverse_() {
+  auto csc = reverse();
+  std::swap(*this, csc);
+}
+
+GraphCSR GraphCSR::reverse() const {
+  return this->toCOO().reverse().toCSR();
+}
+
+GraphCSR GraphCSR::unsymmetrize() const {
+  return this->toCOO().unsymmetrize().toCSR();
+}
 
 GraphCOO GraphCSR::toCOO() const {
     std::vector<vidT> row(this->numE());
