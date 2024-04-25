@@ -11,11 +11,6 @@
 #include "Defines.h"
 #include "Utils.h"
 
-// TODO:
-// 0. Loader
-// 1. COO <--> CSR <--> CSC
-// 2. Partitioning
-
 enum SerDesVersion {
   V1 = 1,
 };
@@ -25,12 +20,10 @@ enum GraphFormat {
   COO,
 };
 
-class Some {
-private:
-  std::string str;
-public:
-  Some(std::string s): str(std::move(s)) {}
-  ~Some() { std::cout << "Destroyed: " << str << std::endl; }
+template <typename T>
+struct Some {
+  T ele;
+  ~Some() { std::cout << "Destroyed: " << ele << std::endl; }
 };
 
 class GraphCSR;
@@ -272,6 +265,10 @@ protected:
   std::shared_ptr<std::vector<eidT>> ptr;
   std::shared_ptr<std::vector<vidT>> idx;
   std::shared_ptr<std::vector<vidT>> deg;
+};
+
+// TODO: a partition of graph
+class GraphPartitionCSR {
 };
 
 // load graph from the binary file

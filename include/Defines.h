@@ -12,3 +12,5 @@ typedef int64_t eidT;
 typedef int32_t idxT;
 typedef int32_t wghT;
 typedef uint64_t embIdxT;
+
+constexpr int WARP_SIZE = 32;

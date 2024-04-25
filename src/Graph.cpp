@@ -100,7 +100,7 @@ GraphCSR GraphCSR::reverse() const {
 }
 
 GraphCSR GraphCSR::unsymmetrize() const {
-  return this->toCOO().unsymmetrize().toCSR();
+  return this->toCOO().unsymmetrize().toCSR_();
 }
 
 GraphCOO GraphCSR::toCOO() const {

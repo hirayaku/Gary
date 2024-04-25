@@ -1,19 +1,20 @@
 cmake_minimum_required(VERSION 3.18)
 
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 70 80 86 89)
+  set(CMAKE_CUDA_ARCHITECTURES 70 80 89)
 endif()
 
-project(TriCUDA LANGUAGES CUDA CXX)
+project(GraphM LANGUAGES CUDA CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(CUDAToolkit REQUIRED)
 find_package(OpenMP REQUIRED)
 # find_package(spdlog REQUIRED)
 
-add_library(graphm SHARED src/Graph.cpp)
+add_library(graphm SHARED src/Graph.cpp src/DeviceGraph.cu)
 target_include_directories(graphm PUBLIC include common)
 target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX fmt::fmt cereal::cereal)
+target_link_libraries(graphm PUBLIC CUDA::cudart rmm::rmm)
 target_compile_features(graphm PUBLIC cxx_std_17 cuda_std_17)
 target_compile_options(graphm PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall>

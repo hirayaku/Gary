@@ -9,9 +9,19 @@ set(BUILD_GMOCK OFF)
 FetchContent_MakeAvailable(googletest)
 
 include(GoogleTest)
+
 ADD_EXECUTABLE(RadixSortTest
   RadixSortTest.cpp
 )
-
 TARGET_INCLUDE_DIRECTORIES(RadixSortTest PUBLIC common)
 TARGET_LINK_LIBRARIES(RadixSortTest PUBLIC OpenMP::OpenMP_CXX gtest_main)
+
+ADD_EXECUTABLE(CUDATest CUDATest.cu common/Utils.cpp)
+TARGET_INCLUDE_DIRECTORIES(CUDATest PRIVATE common include)
+TARGET_LINK_LIBRARIES(CUDATest PUBLIC CUDA::cudart CUDA::nvToolsExt CUB::CUB gtest_main)
+target_compile_options(CUDATest PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX>:-Wall>
+  $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall>
+  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:DEBUG>>:-G>
+  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RELWITHDEBINFO>>:-lineinfo>
+)

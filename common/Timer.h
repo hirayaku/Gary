@@ -5,25 +5,26 @@
 #include <string>
 #include "Utils.h"
 
+namespace utils {
 class Timer {
 public:
   Timer() : Timer("null") {}
   Timer(const std::string &name) : name_(name) {}
-  void start() {
+  virtual void start() {
     gettimeofday(&start_time_, NULL);
   }
-  void stop() {
+  virtual void stop() {
     gettimeofday(&elapsed_time_, NULL);
     elapsed_time_.tv_sec  -= start_time_.tv_sec;
     elapsed_time_.tv_usec -= start_time_.tv_usec;
   }
-  double seconds() const {
+  virtual double seconds() const {
     return (double)elapsed_time_.tv_sec + (double)elapsed_time_.tv_usec/1e6;
   }
-  double millisecs() const {
+  virtual double millisecs() const {
     return (double)1000*(double)elapsed_time_.tv_sec + (double)elapsed_time_.tv_usec/(double)1000;
   }
-  double microsecs() const {
+  virtual double microsecs() const {
     return 1e6*(double)elapsed_time_.tv_sec + (double)elapsed_time_.tv_usec;
   }
   std::string getName() { return name_; }
@@ -44,23 +45,23 @@ class CUDATimer: public Timer {
     cudaEventCreate(&start_event);
     cudaEventCreate(&stop_event);
   }
-  void start() {
+  void start() override {
     utils::cudaNvtxStart(name_);
     cudaEventRecord(start_event);
   }
-  void stop() {
+  void stop() override {
     cudaEventRecord(stop_event);
     cudaEventSynchronize(stop_event);
     cudaEventElapsedTime(&millisecs_, start_event, stop_event);
     utils::cudaNvtxStop();
   }
-  double seconds() const {
+  double seconds() const override {
     return (double)millisecs_ / 1000;
   }
-  double millisecs() const {
+  double millisecs() const override {
     return millisecs_;
   }
-  double microsecs() const {
+  double microsecs() const override {
     return 1e3 * (double)millisecs_;
   }
 
@@ -102,4 +103,4 @@ inline uint64_t readTs() {
 #endif
   return t;
 }
-
+} // namespace utils

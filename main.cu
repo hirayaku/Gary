@@ -7,6 +7,7 @@
 #include "HelperString.h"
 #include "HelperCUDA.h"
 #include "Graph.h"
+#include "ops/Search.cuh"
 
 void cudaSetup(int deviceId, bool verbose) {
   // set up GPU device
