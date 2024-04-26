@@ -106,6 +106,7 @@ __global__ void segmentKernel(SrcT *array, size_t arraySize, DstT **segments) {
     //     segMems[i][threadIdBlock*PerThread+j] = dstBuf[i][j];
     // }
 
+    // memcpy using registers
     // for (int i = 0; i < SegN; ++i) {
     //   for (int j = 0; j < PerThread; ++j) {
     //     segments[i][threadOffset+j] = segMems[i][threadIdBlock*PerThread+j];
@@ -115,13 +116,7 @@ __global__ void segmentKernel(SrcT *array, size_t arraySize, DstT **segments) {
 
   if (blockOffset < arraySize) {
     thisBlock.sync();
-
     for (int i = 0; i < SegN; ++i) {
-      // if (threadIdBlock == 0) {
-      //   printf("Copy 0x%08lx[%dx%lu] to 0x%08lx\n",
-      //     segMems[i], sizeof(DstT), copySize, &segments[i][blockOffset]);
-      //   printf("0x%02x 0x%02x\n", segMems[i][0], segMems[i][1]);
-      // }
       cg::memcpy_async(thisBlock, &segments[i][blockOffset],
         segMems[i], sizeof(DstT) * copySize
       );

@@ -18,7 +18,7 @@ protected:
   template <typename SrcT, typename DstT>
   static std::vector<thrust::host_vector<DstT>>
   RunSegmentArray(const thrust::host_vector<SrcT> &h_in,
-    dim3 gridDim, dim3 blockDim, utils::Timer &timer) {
+    dim3 gridDim, dim3 blockDim, utils::CUDATimer &timer) {
 
     constexpr int SPLITS = sizeof(SrcT) / sizeof(DstT);
     thrust::device_vector<SrcT> d_in = h_in;
@@ -32,13 +32,12 @@ protected:
 
     size_t sharedMem = segmentKernelSMem<SrcT, DstT>(blockDim);
     timer.start();
-    segmentKernel<SrcT, DstT> <<<gridDim, blockDim, sharedMem>>>(
+    segmentKernel<SrcT, DstT> <<<gridDim, blockDim, sharedMem, timer.stream()>>>(
       thrust::raw_pointer_cast(d_in.data()), d_in.size(),
       thrust::raw_pointer_cast(segments_dptr.data())
     );
     timer.stop();
-    // cudaError_t error = cudaGetLastError();
-    // ASSERT_EQ(error, 0) << "CUDA kernel failed: " << cudaGetErrorName(error) << "\n";
+    checkCudaErrors(cudaGetLastError());
 
     std::vector<thrust::host_vector<DstT>> h_out(SPLITS);
     for (int i = 0; i < SPLITS; ++i) {
@@ -97,13 +96,38 @@ TEST_F(CUDATest, BenchmarkLargeArray) {
   dim3 gridDim((SIZE - 1) / blockDim.x + 1);
   thrust::host_vector<uint32_t> h_vec(SIZE, 0xAABBCCDD);
 
-  utils::CUDATimer timer("segmentArray Large");
+  cudaStream_t stream;
+  checkCudaErrors(cudaStreamCreate(&stream));
+  utils::CUDATimer timer("segmentArray Large", stream);
   auto h_out = CUDATest::RunSegmentArray<uint32_t, uint8_t>(h_vec, gridDim, blockDim, timer);
   std::cout << ::testing::UnitTest::GetInstance()->current_test_info()->name()
     << ": kernel takes " << timer.microsecs() << "us" << std::endl;
 
   uint32_t expected = 0xAABBCCDD;
   for (int i = 0; i < 4; ++i) {
+    for (int j = 0; j < SIZE; ++j) {
+      auto value = h_out[i][j];
+      ASSERT_EQ(value, (uint8_t) (expected & 0xFF)) << "Index at (" << i << ", " << j << ")\n";
+    }
+    expected >>= 8;
+  }
+}
+
+TEST_F(CUDATest, BenchmarkLargeArray_u64_u8) {
+  constexpr int SIZE = 128 * 256 * 32;
+  dim3 blockDim(512);
+  dim3 gridDim((SIZE - 1) / blockDim.x + 1);
+  thrust::host_vector<uint64_t> h_vec(SIZE, 0xAABBCCDDEEFF0011);
+
+  cudaStream_t stream;
+  checkCudaErrors(cudaStreamCreate(&stream));
+  utils::CUDATimer timer("segmentArray Large", stream);
+  auto h_out = CUDATest::RunSegmentArray<uint64_t, uint8_t>(h_vec, gridDim, blockDim, timer);
+  std::cout << ::testing::UnitTest::GetInstance()->current_test_info()->name()
+    << ": kernel takes " << timer.microsecs() << "us" << std::endl;
+
+  uint64_t expected = 0xAABBCCDDEEFF0011;
+  for (int i = 0; i < 8; ++i) {
     for (int j = 0; j < SIZE; ++j) {
       auto value = h_out[i][j];
       ASSERT_EQ(value, (uint8_t) (expected & 0xFF)) << "Index at (" << i << ", " << j << ")\n";

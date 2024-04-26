@@ -11,10 +11,15 @@ find_package(CUDAToolkit REQUIRED)
 find_package(OpenMP REQUIRED)
 # find_package(spdlog REQUIRED)
 
+add_library(utils SHARED common/Timer.cpp common/Utils.cpp)
+target_include_directories(utils PUBLIC common)
+target_link_libraries(utils PUBLIC OpenMP::OpenMP_CXX CUDA::cudart CUDA::nvToolsExt)
+target_compile_features(utils PUBLIC cxx_std_17 cuda_std_17)
+
 add_library(graphm SHARED src/Graph.cpp src/DeviceGraph.cu)
-target_include_directories(graphm PUBLIC include common)
-target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX fmt::fmt cereal::cereal)
-target_link_libraries(graphm PUBLIC CUDA::cudart rmm::rmm)
+target_include_directories(graphm PUBLIC include)
+target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX fmt::fmt cereal::cereal rmm::rmm)
+target_link_libraries(graphm PUBLIC utils)
 target_compile_features(graphm PUBLIC cxx_std_17 cuda_std_17)
 target_compile_options(graphm PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall>
@@ -27,8 +32,7 @@ add_executable(convert convert.cpp)
 target_link_libraries(convert PUBLIC graphm)
 target_compile_features(convert PUBLIC cxx_std_17 cuda_std_17)
 
-add_executable(main main.cu common/Utils.cpp)
-target_link_libraries(main PUBLIC CUDA::cudart CUDA::nvToolsExt CUB::CUB rmm::rmm)
+add_executable(main main.cu)
 target_link_libraries(main PUBLIC graphm)
 target_compile_features(main PUBLIC cxx_std_17 cuda_std_17)
 

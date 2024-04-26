@@ -1,9 +1,6 @@
 #pragma once
 #include <sys/time.h>
-#include <iostream>
-#include <iomanip>
 #include <string>
-#include "Utils.h"
 
 namespace utils {
 class Timer {
@@ -40,21 +37,13 @@ private:
 
 class CUDATimer: public Timer {
  public:
-  CUDATimer(const std::string& name) : Timer{name} {
-    cudaDeviceSynchronize();
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&stop_event);
-  }
-  void start() override {
-    utils::cudaNvtxStart(name_);
-    cudaEventRecord(start_event);
-  }
-  void stop() override {
-    cudaEventRecord(stop_event);
-    cudaEventSynchronize(stop_event);
-    cudaEventElapsedTime(&millisecs_, start_event, stop_event);
-    utils::cudaNvtxStop();
-  }
+  CUDATimer(const std::string &name);
+  CUDATimer(const std::string &name, cudaStream_t stream);
+  ~CUDATimer();
+
+  void start() override;
+  void stop() override;
+
   double seconds() const override {
     return (double)millisecs_ / 1000;
   }
@@ -65,12 +54,11 @@ class CUDATimer: public Timer {
     return 1e3 * (double)millisecs_;
   }
 
-  ~CUDATimer() {
-    cudaEventDestroy(start_event);
-    cudaEventDestroy(stop_event);
-  }
+  cudaStream_t stream() const { return stream_; }
+
 private:
   cudaEvent_t start_event, stop_event;
+  cudaStream_t stream_ = 0;
   float millisecs_ = 0;
 };
 
@@ -87,9 +75,9 @@ T timeIt(const F& f, const std::string name) {
   return t;
 }
 
-inline uint64_t readTs() {
+#ifdef __x86_64__
+static inline uint64_t readTs() {
   volatile uint64_t t = 0;
-#ifdef PROFILE_LATENCY
   asm __volatile__(
       "lfence\n"
       // Guaranteed to clear the high-order 32 bits of RAX and RDX.
@@ -100,7 +88,8 @@ inline uint64_t readTs() {
       :
       : "%rdx"
       );
-#endif
   return t;
 }
+#endif
+
 } // namespace utils

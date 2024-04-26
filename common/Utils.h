@@ -6,7 +6,6 @@
 #include <utility>
 #include <memory>
 #include <cuda_runtime.h>
-#include <nvToolsExt.h>
 
 namespace utils {
 
@@ -98,5 +97,7 @@ void cudaNvtxStart(std::string msg);
 void cudaNvtxStop();
 
 void cudaHostSync();
+
+void cudaHostSync(cudaStream_t stream);
 
 } // namespace utils
