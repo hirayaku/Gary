@@ -1,32 +1,36 @@
 #pragma once
-#include "Search.cuh"
+#include <cooperative_groups.h>
+#include <thrust/swap.h>
+#include "Defines.h"
+#include "ops/Search.cuh"
+#include "ops/DeviceIterator.cuh"
 
-// warp-wise intersetion of two lists using the binary seach algorithm
-template <typename GroupT, int TileSize = WARP_SIZE, typename T = int32_t>
-__forceinline__ __device__ T intersectBS(GroupT group, T* a, T size_a, T* b, T size_b, T* c) {
-  if (size_a == 0 || size_b == 0) return 0;
+namespace cg = cooperative_groups;
+
+// intersetion of two sorted span using the binary seach algorithm
+// template <typename T = int32_t>
+// __forceinline__ __device__ T intersectBinary(T* a, T size_a, T* b, T size_b, T* c) {
+using T = vidT;
+// template <typename T = vidT>
+__forceinline__ __device__ T intersectBinarySearch(Span<T *, void> sA, Span<T *, void> sB, T *out) {
+  if (sA.size() == 0 || sB.size() == 0) return 0;
 
   // int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
   // int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
-  // auto thisBlock = coop::this_thread_block();
-  const unsigned tileLane = group.thread_rank() / TileSize;
-  auto thisTile = cg::thread_block_tile<TileSize>(group);
-  const unsigned threadLane = thisTile.thread_rank();
+  const auto thisBlock = cg::this_thread_block();
+  const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
 
-  const unsigned num_warps = thisBlock.size() / WARP_SIZE;
+  int outSize = 0;
 
-  __shared__ T count[WARPS_PER_BLOCK];
-  T* lookup = a;
-  T* search = b;
-  T lookup_size = size_a;
-  T search_size = size_b;
-  if (size_a > size_b) {
-    lookup = b;
-    search = a;
-    lookup_size = size_b;
-    search_size = size_a;
+  if (sA.size() > sB.size()) {
+    thrust::swap(sA, sB);
   }
-  if (thread_lane == 0) count[warp_lane] = 0;
+
+  for (const auto key : sA.cooperate(thisWarp)) {
+    int found = 0;
+    found += binary_search(sB, key)
+  }
+
   for (auto i = thread_lane; i < lookup_size; i += WARP_SIZE) {
     unsigned active = __activemask();
     __syncwarp(active);
@@ -306,6 +310,7 @@ __forceinline__ __device__ T intersect_num_bs_cache(T* a, T size_a, T* b, T size
   }
   return num;
 }
+*/
 
 // warp-wise intersetion of two lists using the merge based algorithm
 template <typename T = int32_t>
@@ -357,6 +362,7 @@ __forceinline__ __device__ T intersect_num_merge(T* a, T size_a, T* b, T size_b)
   return count;
 }
 
+/*
 // warp-wise intersection using hybrid method (binary search + merge)
 template <typename T = int32_t>
 __forceinline__ __device__ T intersect_num(T* a, T size_a, T *b, T size_b) {

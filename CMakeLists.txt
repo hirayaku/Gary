@@ -16,15 +16,15 @@ target_include_directories(utils PUBLIC common)
 target_link_libraries(utils PUBLIC OpenMP::OpenMP_CXX CUDA::cudart CUDA::nvToolsExt)
 target_compile_features(utils PUBLIC cxx_std_17 cuda_std_17)
 
-add_library(graphm SHARED src/Graph.cpp src/DeviceGraph.cu)
+add_library(graphm SHARED src/Graph.cpp src/DeviceGraph.cu src/GraphQueryHom.cu)
 target_include_directories(graphm PUBLIC include)
-target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX fmt::fmt cereal::cereal rmm::rmm)
-target_link_libraries(graphm PUBLIC utils)
+target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX CUDA::cudart rmm::rmm)
+target_link_libraries(graphm PUBLIC fmt::fmt cereal::cereal utils)
 target_compile_features(graphm PUBLIC cxx_std_17 cuda_std_17)
 target_compile_options(graphm PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall>
   $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fopenmp,-Wall>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:DEBUG>>:-G>
+  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:DEBUG>>:-g -G>
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RELWITHDEBINFO>>:-lineinfo>
 )
 

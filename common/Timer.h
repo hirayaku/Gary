@@ -37,6 +37,7 @@ private:
 
 class CUDATimer: public Timer {
  public:
+  CUDATimer(): CUDATimer("null") {}
   CUDATimer(const std::string &name);
   CUDATimer(const std::string &name, cudaStream_t stream);
   ~CUDATimer();

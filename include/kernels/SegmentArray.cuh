@@ -5,8 +5,7 @@
 #include <type_traits>
 #include <cooperative_groups.h>
 #include <cooperative_groups/memcpy_async.h>
-#include <cub/cub.cuh>
-#include "../Defines.h"
+#include "Defines.h"
 
 namespace cg = cooperative_groups;
 
@@ -60,53 +59,62 @@ __global__ void segmentKernel(SrcT *array, size_t arraySize, DstT **segments) {
   DstT *segMems[SegN] = {0};
   for (int i = 0; i < SegN; ++i) {
     segMems[i] = (DstT *) (segMemPtr + i * sizeof(DstT) * blockSrcSize);
-    // if (threadIdBlock == 0)
-    //   printf("0x%08lx\n", segMems[i]);
   }
 
   const size_t blockOffset = blockId * blockSrcSize;
   const size_t threadOffset = threadId * PerThread;
   size_t copySize = 0;
+
+  // NOTE: block level memcpy_async
   if (blockOffset < arraySize) {
     copySize = (blockOffset + blockSrcSize <=  arraySize) ?
       blockSrcSize : arraySize - blockOffset;
-  }
-
-  if (blockOffset < arraySize) {
     // bulk load (it's okay to do this inside a branch)
     cg::memcpy_async(thisBlock, srcMem, &array[blockOffset], sizeof(SrcT) * copySize);
     cg::wait(thisBlock);
   }
 
+  // // NOTE: warp level memcpy_async could also work, but relatively slow
+  // const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+  // const auto warpId = threadId / WARP_SIZE;
+  // const auto warpIdBlock = thisWarp.meta_group_rank();
+  // const size_t warpOffset = warpId * WARP_SIZE * PerThread;
+  // if (warpOffset < arraySize) {
+  //   copySize = warpOffset + WARP_SIZE * PerThread <=  arraySize ?
+  //     WARP_SIZE * PerThread : arraySize - warpOffset;
+  //   cg::memcpy_async(thisWarp, &srcMem[warpIdBlock*WARP_SIZE*PerThread], &array[warpOffset], sizeof(SrcT) * copySize);
+  //   cg::wait(thisWarp);
+  // }
+
   if (threadOffset < arraySize) {
-
-    // segment SrcT array to DstT arrays
-    for (int i = 0; i < PerThread; ++i) {
-      SrcT srcBuf = srcMem[threadIdBlock * PerThread + i];
-      DstT *castToDst = (DstT *)(&srcBuf);
-      #pragma unroll
-      for (int j = 0; j < SegN; ++j) {
-        segMems[j][threadIdBlock*PerThread+i] = castToDst[j];
-      }
-    }
-
-    // DstT dstBuf[SegN][PerThread];
+    // // segment SrcT array to DstT arrays
     // for (int i = 0; i < PerThread; ++i) {
     //   SrcT srcBuf = srcMem[threadIdBlock * PerThread + i];
     //   DstT *castToDst = (DstT *)(&srcBuf);
     //   #pragma unroll
     //   for (int j = 0; j < SegN; ++j) {
-    //     dstBuf[j][i] = castToDst[j];
+    //     segMems[j][threadIdBlock*PerThread+i] = castToDst[j];
     //   }
     // }
-    // for (int i = 0; i < SegN; ++i) {
-    //   // segMems[i][threadIdBlock * PerThread +: PerThread] <- dstBuf[i]
-    //   #pragma unroll
-    //   for (int j = 0; j < PerThread; ++j)
-    //     segMems[i][threadIdBlock*PerThread+j] = dstBuf[i][j];
-    // }
 
-    // memcpy using registers
+    // alternative implementation
+    DstT dstBuf[SegN][PerThread];
+    for (int i = 0; i < PerThread; ++i) {
+      SrcT srcBuf = srcMem[threadIdBlock * PerThread + i];
+      DstT *castToDst = (DstT *)(&srcBuf);
+      #pragma unroll
+      for (int j = 0; j < SegN; ++j) {
+        dstBuf[j][i] = castToDst[j];
+      }
+    }
+    for (int i = 0; i < SegN; ++i) {
+      // segMems[i][threadIdBlock * PerThread +: PerThread] <- dstBuf[i]
+      #pragma unroll
+      for (int j = 0; j < PerThread; ++j)
+        segMems[i][threadIdBlock*PerThread+j] = dstBuf[i][j];
+    }
+
+    // NOTE: memcpy using registers is slow
     // for (int i = 0; i < SegN; ++i) {
     //   for (int j = 0; j < PerThread; ++j) {
     //     segments[i][threadOffset+j] = segMems[i][threadIdBlock*PerThread+j];
@@ -114,8 +122,11 @@ __global__ void segmentKernel(SrcT *array, size_t arraySize, DstT **segments) {
     // }
   }
 
+  // NOTE: block level memcpy_async
   if (blockOffset < arraySize) {
     thisBlock.sync();
+    copySize = (blockOffset + blockSrcSize <=  arraySize) ?
+      blockSrcSize : arraySize - blockOffset;
     for (int i = 0; i < SegN; ++i) {
       cg::memcpy_async(thisBlock, &segments[i][blockOffset],
         segMems[i], sizeof(DstT) * copySize
@@ -123,5 +134,16 @@ __global__ void segmentKernel(SrcT *array, size_t arraySize, DstT **segments) {
     }
     cg::wait(thisBlock);
   }
+
+  // // NOTE: warp level memcpy_async is too fine-grained (128B per warp), bad perf
+  // if (warpOffset < arraySize) {
+  //   copySize = warpOffset + WARP_SIZE * PerThread <=  arraySize ?
+  //     WARP_SIZE * PerThread : arraySize - warpOffset;
+  //   for (int i = 0; i < SegN; ++i) {
+  //     cg::memcpy_async(thisWarp, &segments[i][warpOffset],
+  //       &segMems[i][warpIdBlock*WARP_SIZE*PerThread], sizeof(DstT) * copySize);
+  //   }
+  //   cg::wait(thisWarp);
+  // }
 
 }

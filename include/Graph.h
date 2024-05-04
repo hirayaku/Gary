@@ -34,7 +34,6 @@ public:
   using VRange = utils::IdRange<vidT>;
   using EType = std::tuple<vidT, vidT>;
   static constexpr auto format = GraphFormat::COO;
-  static int id;
 
   vidT numV() const { return m; }
   eidT numE() const { return nnz; }
