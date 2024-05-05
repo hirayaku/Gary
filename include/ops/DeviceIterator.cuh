@@ -175,7 +175,7 @@ public:
 
   DEVICE_ONLY ParIter end() { return ParIter(max, group); }
 
-  // vid ranged from [min, max)
+  // cooperative ID range of [min, max)
   DEVICE_ONLY IdRange(IdType min, IdType max, const CudaGroup &group)
   : min(min), max(max), group(group) {}
 

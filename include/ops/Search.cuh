@@ -45,10 +45,10 @@ binary_search(T *list, T key, T size) {
 }
 
 // thread-sequential binary search
-template <class Indexable, typename T = typename Indexable::value_type> __forceinline__ HOST_DEVICE bool
+template <class Indexable, typename T = typename Indexable::value_type> inline HOST_DEVICE bool
 binary_search(Indexable span, T key) {
   int l = 0;
-  int r = (int)span.size() - 1;
+  int r = (int)(span.size() - 1);
 
   while (r >= l) { 
     int mid = l + (r - l) / 2;
@@ -64,10 +64,10 @@ binary_search(Indexable span, T key) {
 //
 // check if `key` is in `span` and set the position of the found element in `pos`;
 // if `key` not found, `pos` is set to the position where `key` should be inserted after
-template <class Indexable, typename T = typename Indexable::value_type> __forceinline__ HOST_DEVICE bool
+template <class Indexable, typename T = typename Indexable::value_type> inline HOST_DEVICE bool
 binary_search(Indexable span, T key, int &pos) {
   int l = 0;
-  int r = (int)span.size() - 1;
+  int r = (int)(span.size() - 1);
 
   while (r >= l) { 
     pos = l + (r - l) / 2;
@@ -124,18 +124,19 @@ binary_search_2phase(T *list, T *cache, T key, T size) {
 // initialize the indexCache array from list
 template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline HOST_DEVICE void
 build_cache(Span<T*, void> list, Array<S, N> &indexCache) {
-  const auto size = (int)list.size();
+  const auto size = list.size();
   for (size_t i = 0; i < N; i += 1) {
-    indexCache[i] = list[i * (size-1) / (indexCache.size()-1)];
+    // NOTE: i * (size - 1) could well exceed int32_t! use int64_t/size_t here.
+    indexCache[i] = list[i * size / N];
   }
 }
 
 // initialize the indexCache array from list cooperatively
-template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline DEVICE_ONLY void
-build_cache(Span<T*, void> list, Array<S, N> &indexCache, const cg::thread_group &group) {
-  const auto size = (int)list.size();
-  for (auto i : IdRange<int, decltype(group)>(0, N, group))
-    indexCache[i] = list[i * (size-1) / (indexCache.size()-1)];
+template <typename T, size_t N, typename CudaGroup, typename S=std::remove_cv_t<T>> __forceinline__ DEVICE_ONLY void
+build_cache(Span<T*, void> list, Array<S, N> &indexCache, const CudaGroup &group) {
+  const auto size = list.size();
+  for (auto i : IdRange<int, CudaGroup>(0, N, group))
+    indexCache[i] = list[i * size / N];
 }
 
 // thread-sequential binary search with a shared index cache
@@ -143,26 +144,22 @@ build_cache(Span<T*, void> list, Array<S, N> &indexCache, const cg::thread_group
 // *(indexCache.end() - 1) should be the last item in list
 template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline HOST_DEVICE bool
 binary_search_2phase(Span<T*, void> list, const Array<S, N> &indexCache, T key) {
-  const auto cacheSize = (int)indexCache.size();
 
   // phase 1: search in the cache
   int pos = 0;
-  bool foundInCache = binary_search<decltype(indexCache)>(indexCache, key, pos);
+  bool foundInCache = binary_search(indexCache, key, pos);
   if (foundInCache) {
     return true;
   }
-  // only when key is not found in cache,
-  // we could use "pos >= cacheSize - 1" to decide key is not in the list
-  // if (pos < 0 || pos >= cacheSize - 1) {
-  //   return false;
-  // }
-  pos = (pos < 0) ? 0 : pos;
-  pos = (pos >= cacheSize - 1) ? cacheSize - 2 : pos;
+  if (pos < 0) {
+    return false;
+  }
+  // pos = (pos < 0) ? 0 : pos;
 
   //phase 2: search in global memory
-  const auto size = (int) list.size();
-  int bottom = pos * (size - 1) / (cacheSize - 1);
-  int top = (pos + 1) * (size - 1) / (cacheSize - 1);
+  const auto size = list.size();
+  int bottom = pos * size / N;
+  int top = (pos + 1) * size / N;
   Span<T*, void> sublist {list.begin() + bottom, (size_t)(top - bottom) };
-  return binary_search<decltype(sublist)>(sublist, key);
+  return binary_search(sublist, key);
 }

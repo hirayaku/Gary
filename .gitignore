@@ -31,9 +31,11 @@
 *.out
 *.app
 
-# Extra
+# Extra on vscode
+.cache
 .vscode
 build
 build-vscode
 legacy
 **/tags
+
