@@ -37,24 +37,26 @@ public:
 // A span supporting traversal in parallel within CUDA
 // IterType should be random accessible. The traversal order is strided by default.
 // When initializing the Span, ptr & len should be consistent across all threads in the group
-template<typename IterType, typename CudaGroup>
+template<typename T, typename CudaGroup>
 class Span {
 private:
-  IterType ptr_;
-  std::size_t len_;
+  T * const ptr_;
+  const std::size_t len_;
+  const std::size_t rank_;
 
 public:
   const CudaGroup &group;
 
-  using ValueType = decltype(*ptr_);
-  using value_type = decltype(*ptr_);
+  using IterType = T*;
+  using ValueType = T;
+  using value_type = T;
 
   class ParIter {
   private:
-    std::remove_cv_t<IterType> i_;
-    const CudaGroup &group;
+    IterType i_;
+    const int groupSize;
   public:
-    DEVICE_ONLY ParIter(IterType i_, const CudaGroup &group): i_(i_), group(group) {}
+    DEVICE_ONLY ParIter(IterType i_, const CudaGroup &group): i_(i_), groupSize(group.size()) {}
 
     DEVICE_ONLY ValueType operator*() const { return *i_; }
 
@@ -67,18 +69,18 @@ public:
 
     DEVICE_ONLY ParIter operator++(int) {
       ParIter old {*this};
-      i_ += group.size();
+      i_ += groupSize;
       return old;
     }
 
     DEVICE_ONLY ParIter &operator++() {
-      i_ += group.size();
+      i_ += groupSize;
       return *this;
     }
   };
 
   DEVICE_ONLY Span(IterType ptr, std::size_t len, const CudaGroup &group) noexcept
-  : ptr_{ptr}, len_{len}, group(group)
+  : ptr_{ptr}, len_{len}, rank_(group.thread_rank()), group(group)
   {}
 
   DEVICE_ONLY std::size_t size() const noexcept {
@@ -86,7 +88,7 @@ public:
   }
 
   DEVICE_ONLY ParIter begin() noexcept {
-    return ParIter(ptr_ + group.thread_rank(), group);
+    return ParIter(ptr_ + rank_, group);
   }
 
   DEVICE_ONLY ParIter end() noexcept {
@@ -94,20 +96,21 @@ public:
   }
 
   DEVICE_ONLY ValueType &operator[](std::size_t i) noexcept {
-    return *(ptr_ + group.thread_rank() + i);
+    return ptr_[rank_ + i];
   }
 };
 
 // sequential Span (per-thread, shared or on host)
-template<typename IterType>
-class Span<IterType, void> {
+template<typename T>
+class Span<T, void> {
 private:
-  IterType ptr_;
-  std::size_t len_;
+  T * const ptr_;
+  const std::size_t len_;
 
 public:
-  using ValueType = decltype(*ptr_);
-  using value_type = decltype(*ptr_);
+  using IterType = T*;
+  using ValueType = T;
+  using value_type = T;
 
   HOST_DEVICE Span(IterType ptr, const std::size_t len) noexcept
   : ptr_{ptr}, len_{len}
@@ -126,13 +129,13 @@ public:
   }
 
   HOST_DEVICE ValueType &operator[](std::size_t i) noexcept {
-    return *(ptr_+i);
+    return ptr_[i];
   }
 
   // transform the sequential span into a cooperative span within the `group`
   template <typename CudaGroup>
-  Span<IterType, CudaGroup> cooperate(const CudaGroup &group) {
-    return Span<IterType, CudaGroup>(ptr_, len_, group);
+  Span<T, CudaGroup> cooperate(const CudaGroup &group) {
+    return Span<T, CudaGroup>(ptr_, len_, group);
   }
 };
 
@@ -145,10 +148,11 @@ public:
   class ParIter {
     private:
       IdType i_;
-      const CudaGroup &group;
+      // initialize groupSize to avoid recomputing it for each iteration
+      const int groupSize;
 
     public:
-      DEVICE_ONLY ParIter(IdType i_, const CudaGroup &group): i_(i_), group(group) {}
+      DEVICE_ONLY ParIter(IdType i_, const CudaGroup &group): i_(i_), groupSize(group.size()) {}
 
       DEVICE_ONLY IdType operator*() const { return i_; }
 
@@ -161,28 +165,29 @@ public:
 
       DEVICE_ONLY ParIter operator++(int) {
         ParIter old {*this};
-        i_ += group.size();
+        i_ += groupSize;
         return old;
       }
 
       DEVICE_ONLY ParIter &operator++() {
-        i_ += group.size();
+        i_ += groupSize;
         return *this;
       }
   };
 
-  DEVICE_ONLY ParIter begin() { return ParIter(min + (IdType)group.thread_rank(), group); }
+  DEVICE_ONLY ParIter begin() { return ParIter(min + rank_, group); }
 
   DEVICE_ONLY ParIter end() { return ParIter(max, group); }
 
   // cooperative ID range of [min, max)
   DEVICE_ONLY IdRange(IdType min, IdType max, const CudaGroup &group)
-  : min(min), max(max), group(group) {}
+  : min(min), max(max), rank_(group.thread_rank()), group(group) {}
 
   const CudaGroup &group;
 
 private:
   const IdType min, max;
+  const IdType rank_;
 };
 
 // sequential IdRange (per thread or host)

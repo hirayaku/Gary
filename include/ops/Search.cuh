@@ -9,7 +9,7 @@ namespace cg = cooperative_groups;
 
 // thread-sequential linear search
 template <typename T> __forceinline__ HOST_DEVICE int
-linear_search(Span<T*, void> span, T key) {
+linear_search(Span<T, void> span, T key) {
   for (auto val: span) {
     if (val >= key) return val == key; // sorted array
   }
@@ -18,7 +18,7 @@ linear_search(Span<T*, void> span, T key) {
 
 // warp cooperative linear search
 template <typename T> __forceinline__ DEVICE_ONLY int
-linear_search(Span<T*, cg::thread_warp> span, T key) {
+linear_search(Span<T, cg::thread_warp> span, T key) {
   for (auto iter = span.begin(); ; ++iter) {
     bool valid = (iter != span.end() && *iter <= key);
     bool found = (iter != span.end() && *iter == key);
@@ -30,8 +30,8 @@ linear_search(Span<T*, cg::thread_warp> span, T key) {
 }
 
 // thread-sequential binary search
-template <typename T> __forceinline__ HOST_DEVICE bool
-binary_search(T *list, T key, T size) {
+template <typename T, typename S = std::remove_cv_t<T>> __forceinline__ HOST_DEVICE bool
+binary_search(T *list, S key, S size) {
   int l = 0;
   int r = size-1;
   while (r >= l) { 
@@ -86,8 +86,49 @@ binary_search(Indexable span, T key, int &pos) {
 // otherwise, returns false, and `start` is updated to the end of span
 // template <typename T>
 // __forceinline__ __device__ bool gallop_search(
-//   Span<T*, void> span, T key, typename Span<T*, void>::IterType &start
+//   Span<T, void> span, T key, typename Span<T, void>::IterType &start
 // );
+
+// initialize the indexCache array from list
+template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline HOST_DEVICE void
+build_cache(Span<T, void> list, Array<S, N> &indexCache) {
+  const auto size = list.size();
+  for (size_t i = 0; i < N; i += 1) {
+    // NOTE: i * size could well exceed int32_t! use int64_t/size_t here.
+    indexCache[i] = list[i * size / N];
+  }
+}
+
+// initialize the indexCache array from list cooperatively
+template <typename T, size_t N, typename CudaGroup, typename S=std::remove_cv_t<T>> inline DEVICE_ONLY void
+build_cache(Span<T, void> list, Array<S, N> &indexCache, const CudaGroup &group) {
+  const auto size = list.size();
+  for (auto i : IdRange<int, CudaGroup>(0, N, group))
+    indexCache[i] = list[i * size / N];
+}
+
+// thread-sequential binary search with a shared index cache
+// *indexCache.begin() should be the first item in list
+// *(indexCache.end() - 1) should be the last item in list
+template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline HOST_DEVICE bool
+binary_search_2phase(Span<T, void> list, const Array<S, N> &indexCache, T key) {
+  const auto size = list.size();
+
+  // phase 1: search in the cache
+  int pos = 0;
+  bool foundInCache = binary_search(indexCache, key, pos);
+  if (foundInCache) {
+    return true;
+  }
+  if (pos < 0) {
+    return false;
+  }
+
+  //phase 2: search in global memory
+  int bottom = pos * size / N;
+  int top = (pos + 1) * size / N;
+  return binary_search(list.begin() + bottom, key, top - bottom);
+}
 
 // warp-level binary search
 template <typename T> __forceinline__ DEVICE_ONLY bool
@@ -119,47 +160,4 @@ binary_search_2phase(T *list, T *cache, T key, T size) {
     else bottom = mid + 1;
   }
   return false;
-}
-
-// initialize the indexCache array from list
-template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline HOST_DEVICE void
-build_cache(Span<T*, void> list, Array<S, N> &indexCache) {
-  const auto size = list.size();
-  for (size_t i = 0; i < N; i += 1) {
-    // NOTE: i * (size - 1) could well exceed int32_t! use int64_t/size_t here.
-    indexCache[i] = list[i * size / N];
-  }
-}
-
-// initialize the indexCache array from list cooperatively
-template <typename T, size_t N, typename CudaGroup, typename S=std::remove_cv_t<T>> __forceinline__ DEVICE_ONLY void
-build_cache(Span<T*, void> list, Array<S, N> &indexCache, const CudaGroup &group) {
-  const auto size = list.size();
-  for (auto i : IdRange<int, CudaGroup>(0, N, group))
-    indexCache[i] = list[i * size / N];
-}
-
-// thread-sequential binary search with a shared index cache
-// *indexCache.begin() should be the first item in list
-// *(indexCache.end() - 1) should be the last item in list
-template <typename T, size_t N, typename S=std::remove_cv_t<T>> inline HOST_DEVICE bool
-binary_search_2phase(Span<T*, void> list, const Array<S, N> &indexCache, T key) {
-
-  // phase 1: search in the cache
-  int pos = 0;
-  bool foundInCache = binary_search(indexCache, key, pos);
-  if (foundInCache) {
-    return true;
-  }
-  if (pos < 0) {
-    return false;
-  }
-  // pos = (pos < 0) ? 0 : pos;
-
-  //phase 2: search in global memory
-  const auto size = list.size();
-  int bottom = pos * size / N;
-  int top = (pos + 1) * size / N;
-  Span<T*, void> sublist {list.begin() + bottom, (size_t)(top - bottom) };
-  return binary_search(sublist, key);
 }

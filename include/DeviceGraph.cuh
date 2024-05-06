@@ -42,12 +42,12 @@ HOST_DEVICE struct DeviceGraph {
 
   // get neighbors of a vertex
   template <typename CudaGroup>
-  DEVICE_ONLY Span<vidT *, CudaGroup> N(vidT v, const CudaGroup &group) const {
-    return Span<vidT *, CudaGroup>(colIdx+indPtr[v], deg[v], group);
+  DEVICE_ONLY Span<vidT, CudaGroup> N(vidT v, const CudaGroup &group) const {
+    return Span<vidT, CudaGroup>(colIdx+indPtr[v], deg[v], group);
   }
 
-  HOST_DEVICE Span<vidT *, void> N(vidT v) const {
-    return Span<vidT *, void>(colIdx+indPtr[v], deg[v]);
+  HOST_DEVICE Span<vidT, void> N(vidT v) const {
+    return Span<vidT, void>(colIdx+indPtr[v], deg[v]);
   }
 };
 

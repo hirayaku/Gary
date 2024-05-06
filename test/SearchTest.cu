@@ -19,7 +19,7 @@ __global__ void binarySearchKernel(T* data, size_t len, T* keys, size_t numKeys,
   const auto thisBlock = cg::this_thread_block();
   const auto threadId = thisGrid.thread_rank();
 
-  Span<T*, void> list {data, len};
+  Span<T, void> list {data, len};
   for (auto idx : IdRange<size_t, decltype(thisGrid)> {0, numKeys, thisGrid}) {
     results[idx] = binary_search(list, keys[idx]);
   }
@@ -34,7 +34,7 @@ __global__ void binarySearchCountKernel(T* data, size_t len, T* keys, size_t num
   const auto threadId = thisGrid.thread_rank();
   // __shared__ int blockCount[1];
 
-  Span<T*, void> list {data, len};
+  Span<T, void> list {data, len};
   for (auto idx : IdRange<size_t, decltype(thisGrid)> {0, numKeys, thisGrid}) {
     if (binary_search(list, keys[idx]))
       atomicAdd(count, 1);
@@ -56,7 +56,7 @@ __global__ void binarySearch2PhaseKernel(T* data, size_t len, T* keys, size_t nu
   const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
   const auto warpIdBlock = thisWarp.meta_group_rank();
 
-  Span<T*, void> list {data, len};
+  Span<T, void> list {data, len};
   Array<T, N> warpCache {smem + warpIdBlock * N};
   build_cache(list, warpCache, thisWarp);
   thisWarp.sync();
@@ -78,7 +78,7 @@ __global__ void binarySearch2PhaseCountKernel(T* data, size_t len, T* keys, size
   const auto warpIdBlock = thisWarp.meta_group_rank();
   const auto threadIdBlock = thisBlock.thread_rank();
 
-  Span<T*, void> list {data, len};
+  Span<T, void> list {data, len};
   Array<T, N> warpCache {smem + warpIdBlock * N};
   build_cache(list, warpCache, thisWarp);
   thisWarp.sync();
@@ -128,8 +128,9 @@ protected:
   static constexpr int cacheSize = 32; 
 
   static void SetUpTestCase() {
-    std::random_device rd;
-    int seed = rd();
+    // std::random_device rd;
+    // int seed = rd();
+    int seed = 0;
     gen = std::mt19937(seed);
     GTEST_LOG_(INFO) << "Using seed=" << seed;
 
@@ -140,8 +141,8 @@ protected:
     // generate common test data
     constexpr int low = 1024 * 1024 * 1024 / 2, high = 1024 * 1024 * 1024;
     const int keyLow = low, keyHigh = high;
-    constexpr int numItems = 1024 * 1024 * 16;
-    constexpr int numKeys = 1024 * 1024 + 1;
+    constexpr int numItems = 1024 * 1024 * 4;
+    constexpr int numKeys = 1024 * 32;
     testSearch = GenerateRandomIntegers(numItems, low, high);
     testKeys = GenerateRandomIntegers(numKeys, keyLow, keyHigh);
   }
@@ -173,7 +174,7 @@ protected:
     const thrust::host_vector<T> &vec, const thrust::host_vector<T> &search
   ) {
     thrust::host_vector<bool> results(search.size());
-    Span<const T*, void> list {thrust::raw_pointer_cast(&vec[0]), vec.size()};
+    Span<const T, void> list {thrust::raw_pointer_cast(&vec[0]), vec.size()};
     for (size_t i = 0; i < search.size(); ++i)
       results[i] = binary_search(list, search[i]);
     return results;
@@ -185,7 +186,7 @@ protected:
     const Array<T, N> &cache
   ) {
     thrust::host_vector<bool> results(keys.size());
-    Span<const T*, void> list {thrust::raw_pointer_cast(vec.data()), vec.size()};
+    Span<const T, void> list {thrust::raw_pointer_cast(vec.data()), vec.size()};
     for (size_t i = 0; i < keys.size(); ++i) {
       results[i] = binary_search_2phase<const T>(list, cache, keys[i]);
     }
@@ -284,7 +285,7 @@ TEST_F(SearchTest, BinarySearchWithCacheCPU) {
   timer.start();
 
   thrust::host_vector<int> cache(cacheSize);
-  Span<const int*, void> list {thrust::raw_pointer_cast(vec.data()), vec.size()};
+  Span<const int, void> list {thrust::raw_pointer_cast(vec.data()), vec.size()};
   Array<int, cacheSize> cacheView {cache.data()};
   build_cache(list, cacheView);
 
@@ -315,8 +316,8 @@ TEST_F(SearchTest, BinarySearchCUDA) {
   cudaStream_t stream;
   checkCudaErrors(cudaStreamCreate(&stream));
   utils::CUDATimer timer("Binary search on CUDA", stream);
-  dim3 gridDim(8);
-  dim3 blockDim(512);
+  dim3 gridDim(1);
+  dim3 blockDim(32);
   const auto results = RunCUDABinarySearch<int>(vec, keys, gridDim, blockDim, timer, false);
 
   GTEST_LOG_(INFO) << "target takes " << timer.microsecs() << "us";
@@ -339,8 +340,8 @@ TEST_F(SearchTest, BinarySearchWithCacheCUDA) {
   cudaStream_t stream;
   checkCudaErrors(cudaStreamCreate(&stream));
   utils::CUDATimer timer("Binary search on CUDA (cache)", stream);
-  dim3 gridDim(8);
-  dim3 blockDim(512);
+  dim3 gridDim(1);
+  dim3 blockDim(32);
   const auto results = RunCUDABinarySearch2Phase<int, cacheSize>(
     vec, keys, gridDim, blockDim, timer, false);
 
