@@ -18,7 +18,7 @@ linear_search(Span<T, void> span, T key) {
 
 // warp cooperative linear search
 template <typename T> __forceinline__ DEVICE_ONLY int
-linear_search(Span<T, cg::thread_warp> span, T key) {
+linear_search(Span<T, utils::thread_warp> span, T key) {
   for (auto iter = span.begin(); ; ++iter) {
     bool valid = (iter != span.end() && *iter <= key);
     bool found = (iter != span.end() && *iter == key);
@@ -103,7 +103,8 @@ build_cache(Span<T, void> list, Array<S, N> &indexCache) {
 template <typename T, size_t N, typename CudaGroup, typename S=std::remove_cv_t<T>> inline DEVICE_ONLY void
 build_cache(Span<T, void> list, Array<S, N> &indexCache, const CudaGroup &group) {
   const auto size = list.size();
-  for (auto i : IdRange<int, CudaGroup>(0, N, group))
+  IdRange<int, CudaGroup> range{0, N, group};
+  for (auto i : range)
     indexCache[i] = list[i * size / N];
 }
 

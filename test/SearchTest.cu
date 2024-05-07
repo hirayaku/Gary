@@ -82,7 +82,7 @@ __global__ void batchedBinarySearchKernel(int batchSize, T **data, size_t *dataS
     Span<T, void> dataSpan  {data[i], dataSizes[i]};
     Span<T, void> keySpan   {keys[i], keySizes[i]};
     Span<bool, void> resultSpan {results[i], keySizes[i]};
-    for (int keyIdx : IdRange<int, cg::thread_warp> {0, keySizes[i], thisWarp} ) {
+    for (int keyIdx : IdRange<size_t, utils::thread_warp> {0, keySizes[i], thisWarp} ) {
       resultSpan[keyIdx] = binary_search(dataSpan, keySpan[keyIdx]);
     }
   }
@@ -102,34 +102,34 @@ __global__ void batchedBinarySearch2PhaseKernel(int batchSize, T **data, size_t 
   const auto warpId = blockId * blockWarps + thisWarp.meta_group_rank();
   const auto warpIdBlock = thisWarp.meta_group_rank();
 
-  int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
-  int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
+  // int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
+  // int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
 
   for (int i = warpId; i < batchSize; i += gridWarps) {
-    // Span<T, void> dataSpan  {data[i], dataSizes[i]};
-    // Span<T, void> keySpan   {keys[i], keySizes[i]};
-    // Span<bool, void> resultSpan {results[i], keySizes[i]};
-
-    // Array<T, N> warpCache {smem + warpIdBlock * N};
-    // build_cache(dataSpan, warpCache, thisWarp);
-    // thisWarp.sync(); 
-
-    // for (int keyIdx : IdRange<int, cg::thread_warp> {0, keySizes[i], thisWarp} ) {
-    //   resultSpan[keyIdx] = binary_search_2phase(dataSpan, warpCache, keySpan[keyIdx]);
-    // }
-
-    Span<T, void> search  {data[i], dataSizes[i]};
-    Span<T, void> lookup  {keys[i], keySizes[i]};
+    Span<T, void> dataSpan  {data[i], dataSizes[i]};
+    Span<T, void> keySpan   {keys[i], keySizes[i]};
     Span<bool, void> resultSpan {results[i], keySizes[i]};
-    size_t search_size = dataSizes[i];
-    size_t lookup_size = keySizes[i];
-    smem[warp_lane * WARP_SIZE + thread_lane] = search[thread_lane * search_size / WARP_SIZE];
-    __syncwarp();
 
-    for (auto i = thread_lane; i < lookup_size; i += WARP_SIZE) {
-      T key = lookup[i]; // each thread picks a vertex as the key
-      resultSpan[i]  = binary_search_2phase(search.begin(), smem, key, (int) search_size);
+    Array<T, N> warpCache {smem + warpIdBlock * N};
+    build_cache(dataSpan, warpCache, thisWarp);
+    thisWarp.sync(); 
+
+    for (int keyIdx : IdRange<size_t, utils::thread_warp> {0, keySizes[i], thisWarp} ) {
+      resultSpan[keyIdx] = binary_search_2phase(dataSpan, warpCache, keySpan[keyIdx]);
     }
+
+    // Span<T, void> search  {data[i], dataSizes[i]};
+    // Span<T, void> lookup  {keys[i], keySizes[i]};
+    // Span<bool, void> resultSpan {results[i], keySizes[i]};
+    // size_t search_size = dataSizes[i];
+    // size_t lookup_size = keySizes[i];
+    // smem[warp_lane * WARP_SIZE + thread_lane] = search[thread_lane * search_size / WARP_SIZE];
+    // __syncwarp();
+
+    // for (auto i = thread_lane; i < lookup_size; i += WARP_SIZE) {
+    //   T key = lookup[i]; // each thread picks a vertex as the key
+    //   resultSpan[i]  = binary_search_2phase(search.begin(), smem, key, (int) search_size);
+    // }
   }
 } 
 
@@ -178,12 +178,6 @@ binarySearch2PhaseOG(T *search, size_t search_size, T *lookup, size_t lookup_siz
     T key = lookup[i]; // each thread picks a vertex as the key
     results[i]  = binary_search_2phase(search, cache, key, (int) search_size);
   }
-}
-
-template <typename T, typename CudaGroup>
-__global__ void linearSearchKernel(T* data, size_t len, T* keys, size_t numKeys,
-  bool* results) {
-  // TODO
 }
 
 class SearchTest : public testing::Test {
@@ -567,7 +561,7 @@ TEST_F(SearchTest, BatchedBinarySearchCUDA) {
   #pragma omp parallel for
   for (int i = 0; i < batchSize; ++i) {
     std::sort(searchVecs[i].begin(), searchVecs[i].end());
-    // std::sort(searchVecs[i].begin(), searchVecs[i].end());
+    std::sort(searchVecs[i].begin(), searchVecs[i].end());
     if (i % 16 == 0) std::cout << '.' << std::flush;
   }
   std::cout << std::endl;
