@@ -66,6 +66,73 @@ __global__ void binarySearch2PhaseKernel(T* data, size_t len, T* keys, size_t nu
   }
 }
 
+template <typename T>
+__global__ void batchedBinarySearchKernel(int batchSize, T **data, size_t *dataSizes,
+  T** keys, size_t *keySizes, bool **results) {
+
+  const auto thisGrid = cg::this_grid();
+  const auto thisBlock = cg::this_thread_block();
+  const auto blockId = thisGrid.block_rank();
+  const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+  const auto blockWarps = warpsPerBlock(blockDim);
+  const auto gridWarps = thisGrid.num_blocks() * blockWarps;
+  const auto warpId = blockId * blockWarps + thisWarp.meta_group_rank();
+
+  for (int i = warpId; i < batchSize; i += gridWarps) {
+    Span<T, void> dataSpan  {data[i], dataSizes[i]};
+    Span<T, void> keySpan   {keys[i], keySizes[i]};
+    Span<bool, void> resultSpan {results[i], keySizes[i]};
+    for (int keyIdx : IdRange<int, cg::thread_warp> {0, keySizes[i], thisWarp} ) {
+      resultSpan[keyIdx] = binary_search(dataSpan, keySpan[keyIdx]);
+    }
+  }
+} 
+
+template <typename T, size_t N>
+__global__ void batchedBinarySearch2PhaseKernel(int batchSize, T **data, size_t *dataSizes,
+  T** keys, size_t *keySizes, bool **results) {
+
+  extern __shared__ T smem[];
+  const auto thisGrid = cg::this_grid();
+  const auto thisBlock = cg::this_thread_block();
+  const auto blockId = thisGrid.block_rank();
+  const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+  const auto blockWarps = warpsPerBlock(blockDim);
+  const auto gridWarps = thisGrid.num_blocks() * blockWarps;
+  const auto warpId = blockId * blockWarps + thisWarp.meta_group_rank();
+  const auto warpIdBlock = thisWarp.meta_group_rank();
+
+  int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
+  int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
+
+  for (int i = warpId; i < batchSize; i += gridWarps) {
+    // Span<T, void> dataSpan  {data[i], dataSizes[i]};
+    // Span<T, void> keySpan   {keys[i], keySizes[i]};
+    // Span<bool, void> resultSpan {results[i], keySizes[i]};
+
+    // Array<T, N> warpCache {smem + warpIdBlock * N};
+    // build_cache(dataSpan, warpCache, thisWarp);
+    // thisWarp.sync(); 
+
+    // for (int keyIdx : IdRange<int, cg::thread_warp> {0, keySizes[i], thisWarp} ) {
+    //   resultSpan[keyIdx] = binary_search_2phase(dataSpan, warpCache, keySpan[keyIdx]);
+    // }
+
+    Span<T, void> search  {data[i], dataSizes[i]};
+    Span<T, void> lookup  {keys[i], keySizes[i]};
+    Span<bool, void> resultSpan {results[i], keySizes[i]};
+    size_t search_size = dataSizes[i];
+    size_t lookup_size = keySizes[i];
+    smem[warp_lane * WARP_SIZE + thread_lane] = search[thread_lane * search_size / WARP_SIZE];
+    __syncwarp();
+
+    for (auto i = thread_lane; i < lookup_size; i += WARP_SIZE) {
+      T key = lookup[i]; // each thread picks a vertex as the key
+      resultSpan[i]  = binary_search_2phase(search.begin(), smem, key, (int) search_size);
+    }
+  }
+} 
+
 template <typename T, size_t N=32>
 __global__ void binarySearch2PhaseCountKernel(T* data, size_t len, T* keys, size_t numKeys,
   int* count) {
@@ -475,4 +542,107 @@ TEST_F(SearchTest, BinarySearchWithCacheUnsortedCUDA) {
   for (size_t i = 0; i < results.size(); ++i)
     ASSERT_EQ(results[i], resultsRef[i]) << " at index: " << i
       << " item: " << keys[i] << "\n";
+}
+
+TEST_F(SearchTest, BatchedBinarySearchCUDA) {
+  constexpr int batchSize = 256;
+  constexpr int numKeys = 1024 * 64;
+  constexpr int low = 1024 * 1024 * 1024 / 16, high = 1024 * 1024 * 1024;
+  std::vector<thrust::host_vector<int>> searchVecs(batchSize);
+  std::vector<thrust::host_vector<int>> keyVecs(batchSize);
+  thrust::host_vector<size_t> hostSearchSizes(batchSize), hostKeySizes(batchSize);
+
+  // generate test vectors
+  std::uniform_int_distribution<size_t> dis(1024 * 1024 * 4, 1024 * 1024 * 8);
+  for (int i = 0; i < batchSize; ++i) {
+    size_t len = dis(gen);
+    searchVecs[i] = GenerateRandomIntegers(len, low, high);
+    keyVecs[i] = GenerateRandomIntegers(numKeys, low, high);
+    hostSearchSizes[i] = len;
+    hostKeySizes[i] = numKeys;
+    if (i % 16 == 0) std::cout << '.' << std::flush;
+  }
+  std::cout << std::endl;
+
+  #pragma omp parallel for
+  for (int i = 0; i < batchSize; ++i) {
+    std::sort(searchVecs[i].begin(), searchVecs[i].end());
+    // std::sort(searchVecs[i].begin(), searchVecs[i].end());
+    if (i % 16 == 0) std::cout << '.' << std::flush;
+  }
+  std::cout << std::endl;
+
+  // get reference results on CPU
+  std::vector<thrust::host_vector<bool>> resultRefVecs(batchSize);
+  utils::Timer cpuTimer("Parallel binary lookup");
+  cpuTimer.start();
+  #pragma omp parallel for
+  for (int i = 0; i < batchSize; ++i) {
+    resultRefVecs[i] = RunStdBinarySearch(searchVecs[i], keyVecs[i]);
+    if (i % 16 == 0) std::cout << '.' << std::flush;
+  }
+  cpuTimer.stop();
+  std::cout << std::endl;
+  GTEST_LOG_(INFO) << "CPU takes " << cpuTimer.microsecs() << "us";
+
+  // move host vectors to device
+  std::vector<thrust::device_vector<int>> devSearchVecs(batchSize), devKeyVecs(batchSize);
+  thrust::host_vector<int *> hostSearchPtrs(batchSize), hostKeyPtrs(batchSize);
+  std::vector<thrust::device_vector<bool>> resultVecs(batchSize);
+  thrust::host_vector<bool *> hostResultPtrs(batchSize);
+  for (int i = 0; i < batchSize; ++i) {
+    // search vectors
+    devSearchVecs[i] = searchVecs[i];
+    hostSearchPtrs[i] = thrust::raw_pointer_cast(devSearchVecs[i].data());
+    // key vectors
+    devKeyVecs[i] = keyVecs[i];
+    hostKeyPtrs[i] = thrust::raw_pointer_cast(devKeyVecs[i].data());
+    // result vectors
+    resultVecs[i] = thrust::device_vector<bool>(numKeys);
+    hostResultPtrs[i] = thrust::raw_pointer_cast(resultVecs[i].data());
+  }
+
+  thrust::device_vector<int *> devSearchPtrs = hostSearchPtrs, devKeyPtrs = hostKeyPtrs;
+  thrust::device_vector<size_t> devSearchSizes = hostSearchSizes, devKeySizes = hostKeySizes;
+  thrust::device_vector<bool *> devResultPtrs = hostResultPtrs;
+
+  cudaStream_t stream;
+  checkCudaErrors(cudaStreamCreate(&stream));
+  utils::CUDATimer timer("Batched binary search on CUDA", stream);
+  dim3 gridDim(batchSize);
+  dim3 blockDim(32);
+
+  timer.start();
+  batchedBinarySearchKernel<int> <<<gridDim, blockDim, 0, stream>>> (
+    batchSize,
+    thrust::raw_pointer_cast(devSearchPtrs.data()), thrust::raw_pointer_cast(devSearchSizes.data()),
+    thrust::raw_pointer_cast(devKeyPtrs.data()), thrust::raw_pointer_cast(devKeySizes.data()),
+    thrust::raw_pointer_cast(devResultPtrs.data())
+  );
+  timer.stop();
+  GTEST_LOG_(INFO) << "target takes " << timer.microsecs() << "us";
+  for (int i = 0; i < batchSize; ++i) {
+    thrust::host_vector<bool> hostResultVec = resultVecs[i];
+    for (size_t keyIdx = 0; keyIdx < numKeys; ++keyIdx) 
+      ASSERT_EQ(hostResultVec[keyIdx], resultRefVecs[i][keyIdx]) << " at index: "
+        << '[' << i << ',' << keyIdx << "], item=" << keyVecs[i][keyIdx] << "\n";
+  }
+
+  timer.start();
+  size_t smem = cacheSize * sizeof(int) * warpsPerBlock(blockDim);
+  batchedBinarySearch2PhaseKernel<int, cacheSize> <<<gridDim, blockDim, smem, stream>>> (
+    batchSize,
+    thrust::raw_pointer_cast(devSearchPtrs.data()), thrust::raw_pointer_cast(devSearchSizes.data()),
+    thrust::raw_pointer_cast(devKeyPtrs.data()), thrust::raw_pointer_cast(devKeySizes.data()),
+    thrust::raw_pointer_cast(devResultPtrs.data())
+  );
+  timer.stop();
+  GTEST_LOG_(INFO) << "target takes " << timer.microsecs() << "us";
+
+  for (int i = 0; i < batchSize; ++i) {
+    thrust::host_vector<bool> hostResultVec = resultVecs[i];
+    for (size_t keyIdx = 0; keyIdx < numKeys; ++keyIdx) 
+      ASSERT_EQ(hostResultVec[keyIdx], resultRefVecs[i][keyIdx]) << " at index: "
+        << '[' << i << ',' << keyIdx << "], item=" << keyVecs[i][keyIdx] << "\n";
+  }
 }
