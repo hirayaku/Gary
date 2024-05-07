@@ -32,20 +32,10 @@ HOST_DEVICE struct DeviceGraph {
   // eno: the index of the edge in the adjacency list of vid; requires 0 <= eno < degree(vid)
   HOST_DEVICE EType getEdge(vidT vid, vidT eno) const { return {vid, colIdx[indPtr[vid]+eno]}; }
 
-  // get all vertices and traverse in parallel
-  template <typename CudaGroup>
-  DEVICE_ONLY IdRange<vidT, CudaGroup> V(const CudaGroup &group) const {
-    return IdRange<vidT, CudaGroup>(0, m, group);
-  }
-
+  // get all vertices
   HOST_DEVICE IdRange<vidT, void> V() const { return IdRange<vidT, void>(0, m); }
 
   // get neighbors of a vertex
-  template <typename CudaGroup>
-  DEVICE_ONLY Span<vidT, CudaGroup> N(vidT v, const CudaGroup &group) const {
-    return Span<vidT, CudaGroup>(colIdx+indPtr[v], deg[v], group);
-  }
-
   HOST_DEVICE Span<vidT, void> N(vidT v) const {
     return Span<vidT, void>(colIdx+indPtr[v], deg[v]);
   }

@@ -53,6 +53,7 @@ TEST_F(CUDATest, RunEmptyKernel) {
   dim3 gridDim(2);
   dim3 blockDim(32);
   emptyKernel<<<gridDim, blockDim>>>();
+  cudaDeviceSynchronize();
   checkCudaErrors(cudaGetLastError());
 }
 

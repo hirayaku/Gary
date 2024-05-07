@@ -16,7 +16,10 @@ __global__ void emptyKernel() {
   const auto warpId = thisBlock.thread_rank() / WARP_SIZE;
   const auto threadIdBlock = thisBlock.thread_rank();
 
-  for (auto i :  IdRange<int, decltype(thisGrid)>(0, 65, thisGrid)) {
+  IdRange<int, void> range(0, 65);
+  // BCastSpan<int, decltype(thisWarp), decltype(thisGrid), decltype(range.begin())> span {
+  //   range.begin(), range.size(), thisWarp, thisGrid};
+  for (auto i : range.cooperate(thisWarp, thisGrid)) {
     printf("(%llu, %u): %d \n", blockId, threadIdBlock, i);
   }
 }
