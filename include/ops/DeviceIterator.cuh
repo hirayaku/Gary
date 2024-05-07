@@ -1,14 +1,13 @@
 #pragma once
 
 #include <cooperative_groups.h>
-#include <cuda/std/array>
 #include "Defines.h"
 
 namespace cooperative_groups {
   using thread_warp = thread_block_tile<WARP_SIZE>;
 }
 
-static inline int warpsPerBlock(dim3 blockDim) {
+static inline HOST_DEVICE int warpsPerBlock(dim3 blockDim) {
   return blockDim.x * blockDim.y * blockDim.z / WARP_SIZE;
 }
 
