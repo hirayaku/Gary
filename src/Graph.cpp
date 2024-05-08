@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
-#include <atomic>
 #include <fmt/format.h>
 #include "Graph.h"
 #include "ParUtils.h"
@@ -17,19 +16,48 @@ GraphCOO::ERange::ERange(const GraphCOO &graph, eidT minId, eidT maxId)
     );
 }
 
-GraphCOO GraphCOO::unsymmetrize() const {
+GraphCOO GraphCOO::symmetrize() const {
   GraphCOO cooT = this->reverse();
-  std::vector<vidT> newrow(numE() * 2);
-  std::vector<vidT> newcol(numE() * 2);
-  std::copy(this->row->begin(), this->row->end(), newrow.begin());
-  std::copy(this->col->begin(), this->col->end(), newcol.begin());
-  std::copy(cooT.row->begin(), cooT.row->end(), newrow.begin()+numE());
-  std::copy(cooT.col->begin(), cooT.col->end(), newcol.begin()+numE());
-  return GraphCOO(
+  std::vector<vidT> newRow(numE() * 2);
+  std::vector<vidT> newCol(numE() * 2);
+  std::copy(this->row->begin(), this->row->end(), newRow.begin());
+  std::copy(this->col->begin(), this->col->end(), newCol.begin());
+  std::copy(cooT.row->begin(), cooT.row->end(), newRow.begin()+numE());
+  std::copy(cooT.col->begin(), cooT.col->end(), newCol.begin()+numE());
+  return GraphCOO {
     numV(), numE() * 2,
-    std::make_shared<std::vector<vidT>>(std::move(newrow)),
-    std::make_shared<std::vector<vidT>>(std::move(newcol))
-  );
+    std::make_shared<std::vector<vidT>>(std::move(newRow)),
+    std::make_shared<std::vector<vidT>>(std::move(newCol))
+  };
+}
+
+GraphCOO GraphCOO::orientation() const {
+  const auto edges = E();
+  eidT newNumE = std::count_if(edges.begin(), edges.end(), [](EType edge) {
+    return std::get<0>(edge) > std::get<1>(edge);
+  });
+  std::vector<vidT> newRow(newNumE), newCol(newNumE);
+
+  // thrust tuple is incompatible with std::tuple
+  // std::copy_if(edges.begin(), edges.end(), thrust::make_zip_iterator(newRow.begin(), newRow.end()),
+  //   [](EType edge) { return std::get<0>(edge) > std::get<1>(edge); }
+  // );
+  auto rowIter = newRow.begin();
+  auto colIter = newCol.begin();
+  for (const auto &e : edges) {
+    vidT src, dst;
+    std::tie(src, dst) = e;
+    if (src > dst) {
+      *rowIter++ = src;
+      *colIter++ = dst;
+    }
+  }
+
+  return GraphCOO {
+    numV(), newNumE,
+    std::make_shared<std::vector<vidT>>(std::move(newRow)),
+    std::make_shared<std::vector<vidT>>(std::move(newCol))
+  };
 }
 
 GraphCSR GraphCOO::toCSR_(bool sorted)  {
@@ -106,8 +134,8 @@ GraphCSR GraphCSR::reverse() const {
   return this->toCOO().reverse().toCSR();
 }
 
-GraphCSR GraphCSR::unsymmetrize() const {
-  return this->toCOO().unsymmetrize().toCSR_();
+GraphCSR GraphCSR::symmetrize() const {
+  return this->toCOO().symmetrize().toCSR_();
 }
 
 GraphCOO GraphCSR::toCOO() const {
@@ -126,10 +154,10 @@ GraphCOO GraphCSR::toCOO() const {
     );
 }
 
-GraphCOO loadFromSNAP(std::string txtFileName) {
-  FILE *fp = fopen(txtFileName.data(), "r");
+GraphCOO loadFromSNAP(fs::path txtFileName) {
+  FILE *fp = fopen(txtFileName.c_str(), "r");
   if (fp == nullptr)
-    throw std::logic_error(fmt::format("Invalid SNAP file: {}", txtFileName));
+    throw std::logic_error(fmt::format("Invalid SNAP file: {}", txtFileName.string()));
 
   vidT maxId = 0;
   std::vector<vidT> row, col;
@@ -139,7 +167,7 @@ GraphCOO loadFromSNAP(std::string txtFileName) {
   while(std::fgets(line, sizeof(line), fp) != nullptr) {
     if (line[sizeof(line)-2] != '\0')
       throw std::runtime_error(
-        fmt::format("The line is too long ({}:{})", txtFileName, lineno));
+        fmt::format("The line is too long ({}:{})", txtFileName.string(), lineno));
     ++lineno;
 
     // skip comments and empty lines

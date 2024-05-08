@@ -3,8 +3,10 @@
 #include <vector>
 #include <tuple>
 #include <memory>
+#include <iterator>
 #include <type_traits>
 #include <fstream>
+#include <filesystem>
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/memory.hpp>
 #include <cereal/types/vector.hpp>
@@ -43,6 +45,13 @@ public:
   public:
     struct Iter {
       public:
+        // iterator traits
+        using difference_type = eidT;
+        using value_type = EType;
+        using pointer = void;
+        using reference = void;
+        using iterator_category = std::forward_iterator_tag;
+
         Iter(const ERange &erange, eidT eid)
         : erange(erange), eid(eid) {}
         EType operator*() const { return {erange.row[eid], erange.col[eid]}; }
@@ -107,9 +116,12 @@ public:
 
   // For each (u,v), create a copy of (v,u)
   // - for a directed graph, this produces an undirected graph
-  // - for an undirected symmetrized graph, this produces an unsymmetrized copy 
-  // - for an undirected unsymmetrized graph, this operation is invalid
-  GraphCOO unsymmetrize() const;
+  // - for an undirected unsymmetrized graph, this produces an symmetrized copy 
+  // - for an undirected symmetrized graph, this operation is invalid
+  GraphCOO symmetrize() const;
+
+  // apply a full ordering to vertex ids and trim neighbors
+  GraphCOO orientation() const;
 
   // convert graph COO to CSR (if sorted is false, this method would mutate COO) 
   GraphCSR toCSR_(bool sorted=false);
@@ -161,6 +173,13 @@ public:
   public:
     struct Iter {
     public:
+      // iterator traits
+      using difference_type = eidT;
+      using value_type = EType;
+      using pointer = void;
+      using reference = void;
+      using iterator_category = std::forward_iterator_tag;
+
       Iter(const ERange &erange, vidT vid)
       : erange(erange), vid(vid), nid(0), eid(erange.rawPtr[vid])
       { nextVertex(); }
@@ -238,9 +257,9 @@ public:
 
   // For each (u,v), create a copy of (v,u)
   // - for a directed graph, this produces an undirected graph
-  // - for an undirected symmetrized graph, this produces an unsymmetrized copy 
-  // - for an undirected unsymmetrized graph, this operation is invalid
-  GraphCSR unsymmetrize() const;
+  // - for an undirected unsymmetrized graph, this produces an symmetrized copy 
+  // - for an undirected symmetrized graph, this operation is invalid
+  GraphCSR symmetrize() const;
 
   // CSR -> COO
   GraphCOO toCOO() const;
@@ -274,9 +293,11 @@ protected:
 class GraphPartitionCSR {
 };
 
+namespace fs = std::filesystem;
+
 // load graph from the binary file
 template <class GraphT>
-GraphT loadFromBinary(std::string binFileName) {
+GraphT loadFromBinary(fs::path binFileName) {
   GraphT graph;
   std::ifstream input(binFileName, std::ios::binary);
   cereal::BinaryInputArchive iarchive(input);
@@ -286,7 +307,7 @@ GraphT loadFromBinary(std::string binFileName) {
 
 // save graph to the binary file
 template <class GraphT>
-void saveToBinary(const GraphT &graph, std::string binFileName) {
+void saveToBinary(const GraphT &graph, fs::path binFileName) {
   std::ofstream output(binFileName, std::ios::binary);
   cereal::BinaryOutputArchive oarchive(output);
   oarchive(graph);
@@ -294,4 +315,4 @@ void saveToBinary(const GraphT &graph, std::string binFileName) {
 
 // load graph datasets from SNAP: https://snap.stanford.edu/data/index.html
 // assuming vertex ids start consecutively from 0
-GraphCOO loadFromSNAP(std::string txtFileName);
+GraphCOO loadFromSNAP(fs::path txtFileName);
