@@ -7,6 +7,8 @@
 #include <memory>
 #include <cuda_runtime.h>
 
+#include "Zipf.h"
+
 namespace utils {
 
 template<typename IterType>

@@ -32,8 +32,9 @@ GraphCOO GraphCOO::unsymmetrize() const {
   );
 }
 
-GraphCSR GraphCOO::toCSR_()  {
-  utils::radixSortInplacePar(*row, *col);
+GraphCSR GraphCOO::toCSR_(bool sorted)  {
+  if (!sorted)
+    utils::radixSortInplacePar(*row, *col);
 
   std::vector<vidT> degreeTable(numV());
   std::vector<eidT> rowptr(numV()+1);
@@ -42,11 +43,17 @@ GraphCSR GraphCOO::toCSR_()  {
     utils::atomicAdd(degreeTable[row->at(ei)], 1);
   }
   utils::prefixSumPar(numV(), degreeTable.data(), rowptr.data());
-  assert(rowptr[numV()] == numE());
+  if(rowptr[numV()] != numE()) {
+    throw std::logic_error(
+      "Inconsistent rowptr when converting COO to CSR"
+    );
+  }
 
-  #pragma omp parallel for
-  for (vidT vi = 0; vi < numV(); ++vi) {
-    std::sort(col->begin() + rowptr[vi], col->begin() + rowptr[vi+1]);
+  if (!sorted) {
+    #pragma omp parallel for
+    for (vidT vi = 0; vi < numV(); ++vi) {
+      std::sort(col->begin() + rowptr[vi], col->begin() + rowptr[vi+1]);
+    }
   }
 
   return GraphCSR(
@@ -55,13 +62,13 @@ GraphCSR GraphCOO::toCSR_()  {
   );
 }
 
-GraphCSR GraphCOO::toCSR() const {
+GraphCSR GraphCOO::toCSR(bool sorted=false) const {
   GraphCOO coo {
     numV(), numE(),
     std::make_shared<std::vector<vidT>>(*this->row),
     std::make_shared<std::vector<vidT>>(*this->col)
   };
-  return coo.toCSR_();
+  return coo.toCSR_(sorted);
 }
 
 GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vid)

@@ -31,4 +31,6 @@ endfunction()
 
 add_cuda_test(CUDATest CUDATest.cu)
 add_cuda_test(SearchTest SearchTest.cu)
+add_cuda_test(SetOpTest SetOpTest.cu)
 add_cuda_test(CTACommTest CTACommTest.cu)
+add_cuda_test(TriQueryTest TriQueryTest.cu)

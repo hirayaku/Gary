@@ -123,6 +123,7 @@ class Span;
 // A span supporting traversal in parallel within CUDA
 // IterType should be random accessible. The traversal order is strided by default.
 // When initializing the Span, ptr & len should be consistent across all threads in the group
+// **cooperative span is not assignable.**
 template<typename T, typename CudaGroup>
 class Span<T, CudaGroup,
            typename std::enable_if_t<utils::is_cooperatative_group_v<CudaGroup>>> {
@@ -169,7 +170,7 @@ public:
   };
 
   DEVICE_ONLY Span(IterType ptr, std::size_t len, const CudaGroup &group) noexcept
-  : ptr_{ptr}, len_{len}, rank_(group.thread_rank()), group(group)
+  : ptr_{ptr}, len_{len}, rank_(group.thread_rank()), numThreads_(group.size()), group(group)
   {}
 
   // returns the **total size** of the span, not the per-thread size
@@ -194,8 +195,8 @@ public:
 template<typename T>
 class Span<T, void> {
 private:
-  T * const ptr_;
-  const std::size_t len_;
+  T * ptr_;
+  std::size_t len_;
 
 public:
   using IterType = T*;

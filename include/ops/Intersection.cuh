@@ -7,35 +7,57 @@
 
 namespace cg = cooperative_groups;
 
-// intersetion of two sorted span using the binary seach algorithm
-// template <typename T = int32_t>
-// __forceinline__ __device__ T intersectBinary(T* a, T size_a, T* b, T size_b, T* c) {
-using T = vidT;
-// template <typename T = vidT>
-__forceinline__ __device__ T intersectBinarySearch(Span<T *, void> sA, Span<T *, void> sB, T *out) {
-  if (sA.size() == 0 || sB.size() == 0) return 0;
-
-  // int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
-  // int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
-  const auto thisBlock = cg::this_thread_block();
-  const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
-
-  int outSize = 0;
-
+// intersetion of two sorted span using binary seach
+// (warp-cooperative implementation)
+template <typename T = vidT> __forceinline__ DEVICE_ONLY int
+intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, T *out) {
+  if (sA.size() == 0 || sB.size() == 0) return;
   if (sA.size() > sB.size()) {
     thrust::swap(sA, sB);
   }
 
+  __shared__ int count[MAX_WARPS_PER_BLOCK];
+
+  const auto &thisBlock = cg::this_thread_block();
+  const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+  const auto &warpLane = subGroupId(thisWarp, thisBlock);
+  int *localCount = count + warpLane;
+  if (thisWarp.thread_rank() == 0) *localCount = 0;
+
   for (const auto key : sA.cooperate(thisWarp)) {
-    int found = 0;
-    found += binary_search(sB, key)
+    if (binary_search(sB, key)) {
+      int pos = atomicAdd(localCount, 1);
+      out[pos] = key;
+    }
+  }
+  thisWarp.sync();
+  return *localCount;
+}
+
+// original implementation
+template <typename T = vidT> __forceinline__ DEVICE_ONLY T
+intersectBinarySearchOG(T* a, T size_a, T* b, T size_b, T* c) {
+  if (size_a == 0 || size_b == 0) return 0;
+  int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
+  int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
+  __shared__ int count[MAX_WARPS_PER_BLOCK];
+  T* lookup = a;
+  T* search = b;
+  T lookup_size = size_a;
+  T search_size = size_b;
+  if (size_a > size_b) {
+    lookup = b;
+    search = a;
+    lookup_size = size_b;
+    search_size = size_a;
   }
 
+  if (thread_lane == 0) count[warp_lane] = 0;
   for (auto i = thread_lane; i < lookup_size; i += WARP_SIZE) {
     unsigned active = __activemask();
     __syncwarp(active);
     int found = 0;
-    int32_t key = lookup[i]; // each thread picks a vertex as the key
+    T key = lookup[i]; // each thread picks a vertex as the key
     if (binary_search(search, key, search_size))
       found = 1;
     unsigned mask = __ballot_sync(active, found);
@@ -310,7 +332,6 @@ __forceinline__ __device__ T intersect_num_bs_cache(T* a, T size_a, T* b, T size
   }
   return num;
 }
-*/
 
 // warp-wise intersetion of two lists using the merge based algorithm
 template <typename T = int32_t>
@@ -362,7 +383,6 @@ __forceinline__ __device__ T intersect_num_merge(T* a, T size_a, T* b, T size_b)
   return count;
 }
 
-/*
 // warp-wise intersection using hybrid method (binary search + merge)
 template <typename T = int32_t>
 __forceinline__ __device__ T intersect_num(T* a, T size_a, T *b, T size_b) {

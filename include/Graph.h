@@ -91,6 +91,10 @@ public:
   //   col(std::make_shared<std::vector<vidT>>(std::forward<ColT>(col)))
   // {}
 
+  const std::vector<vidT> &getRow() const { return *row; }
+
+  const std::vector<vidT> &getCol() const { return *col; }
+
   // reverse the direction of edges
   void reverse_() {
     std::swap(row, col);
@@ -107,11 +111,11 @@ public:
   // - for an undirected unsymmetrized graph, this operation is invalid
   GraphCOO unsymmetrize() const;
 
-  // convert graph COO to CSR (affects COO)
-  GraphCSR toCSR_();
+  // convert graph COO to CSR (if sorted is false, this method would mutate COO) 
+  GraphCSR toCSR_(bool sorted=false);
 
   // convert graph COO to CSR (immutable)
-  GraphCSR toCSR() const;
+  GraphCSR toCSR(bool sorted) const;
 
   // serialization with cereal
   template <class Archive>

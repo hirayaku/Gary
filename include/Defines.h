@@ -13,6 +13,7 @@ typedef int32_t wghT;
 typedef uint64_t embIdxT;
 
 constexpr int WARP_SIZE = 32;
+constexpr int MAX_WARPS_PER_BLOCK = 32;
 constexpr int FULL_MASK = 0xFFFFFFFF;
 
 #ifndef HOST_DEVICE
