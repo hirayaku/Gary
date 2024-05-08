@@ -43,8 +43,21 @@ public:
   HOST_DEVICE T *end() const { return data + size(); }
 };
 
-// A broadcasting span which generates the same iterator for threads in the same subGroup
-template <typename T, typename SubGroup, typename SuperGroup, typename IterType=T*,
+enum WorkPartition {
+  DYNAMIC = -1,
+  INTERLEAVED = 0,
+  CHUNKED = 1,
+};
+
+static constexpr WorkPartition interleavedPolicy = WorkPartition::INTERLEAVED;
+static constexpr WorkPartition chunkedPolicy = WorkPartition::CHUNKED;
+
+// A broadcasting span which generates the same iterator for threads in the same subgroup
+// This is useful when we want to spread the supergroup-dependent inputs among subgroups
+// The execution policy is interleaved by default (span[i] goes to group[i%num_groups])
+// TODO: implement a chunked execution policy (span[i] goes to group[i/num_groups])
+template <WorkPartition Policy,
+          typename T, typename SubGroup, typename SuperGroup, typename IterType=T*,
           typename = std::enable_if_t<utils::is_cooperatative_group_v<SubGroup>>,
           typename = std::enable_if_t<utils::is_cooperatative_group_v<SuperGroup>>>
 class BCastSpan {
@@ -100,11 +113,19 @@ public:
   }
 
   DEVICE_ONLY ParIter begin() const noexcept {
-    return ParIter(ptr_ + rank_, numGroups_);
+    if constexpr (Policy == WorkPartition::CHUNKED) {
+      return ParIter(ptr_ + rank_ * len_ / numGroups_, 1);
+    } else {
+      return ParIter(ptr_ + rank_, numGroups_);
+    }
   }
 
   DEVICE_ONLY ParIter end() const noexcept {
-    return ParIter(ptr_ + len_, numGroups_);
+    if constexpr (Policy == WorkPartition::CHUNKED) {
+      return ParIter(ptr_ + (rank_ + 1) * len_ / numGroups_, 1);
+    } else {
+      return ParIter(ptr_ + len_, numGroups_);
+    }
   }
 
   // `ptr` and `len` should be consistent across the `superGroup`
@@ -113,7 +134,9 @@ public:
   : ptr_(ptr), len_(len), rank_(subGroupId(subGroup, superGroup)),
     numGroups_(superGroup.size() / subGroup.size()),
     subGroup(subGroup), superGroup(superGroup)
-  { }
+  {
+    static_assert(Policy >= 0 && "Unsupported work partitioning policy");
+  }
 };
 
 
@@ -121,9 +144,9 @@ template<typename T, typename CudaGroup, typename Enable=void>
 class Span;
 
 // A span supporting traversal in parallel within CUDA
-// IterType should be random accessible. The traversal order is strided by default.
+// The traversal order is strided by default.
 // When initializing the Span, ptr & len should be consistent across all threads in the group
-// **cooperative span is not assignable.**
+// Note: **cooperative span is immutable**
 template<typename T, typename CudaGroup>
 class Span<T, CudaGroup,
            typename std::enable_if_t<utils::is_cooperatative_group_v<CudaGroup>>> {
@@ -231,10 +254,18 @@ public:
 
   // transform the sequential span into a cooperative span broadcasting within `subGroup`
   // across the `superGroup`
-  template <typename SubGroup, typename SuperGroup>
-  DEVICE_ONLY BCastSpan<T, SubGroup, SuperGroup, IterType>
+  template <typename SubGroup, typename SuperGroup> DEVICE_ONLY auto
   cooperate(const SubGroup &subGroup, const SuperGroup &superGroup) {
-    return BCastSpan<T, SubGroup, SuperGroup, IterType>(ptr_, len_, subGroup, superGroup);
+    return BCastSpan<WorkPartition::INTERLEAVED, T, SubGroup, SuperGroup, IterType> {
+      ptr_, len_, subGroup, superGroup};
+  }
+
+  // transform the sequential span into a cooperative span broadcasting within `subGroup`
+  // across the `superGroup`
+  template <WorkPartition Policy, typename SubGroup, typename SuperGroup> DEVICE_ONLY auto
+  cooperate(const SubGroup &subGroup, const SuperGroup &superGroup) {
+    return BCastSpan<interleavedPolicy, T, SubGroup, SuperGroup, IterType> {
+      ptr_, len_, subGroup, superGroup};
   }
 };
 
@@ -365,6 +396,8 @@ public:
   // vid ranged from [min, max)
   HOST_DEVICE IdRange(IdType min, IdType max): min(min), max(max) {}
 
+  HOST_DEVICE IdRange(IdType max): min{}, max(max) {}
+
   // transform the sequential IdRange into a cooperative IdRange within the `group`
   template <typename CudaGroup> DEVICE_ONLY IdRange<IdType, CudaGroup>
   cooperate(const CudaGroup &group) {
@@ -373,10 +406,15 @@ public:
 
   // transform the sequential IdRange into a cooperative IdRange broadcasting within `subGroup`
   // across the `superGroup`
-  template <typename SubGroup, typename SuperGroup>
-  DEVICE_ONLY BCastSpan<IdType, SubGroup, SuperGroup, IterType>
+  template <typename SubGroup, typename SuperGroup> DEVICE_ONLY auto
   cooperate(const SubGroup &subGroup, const SuperGroup &superGroup) {
-    return BCastSpan<IdType, SubGroup, SuperGroup, IterType> {
+    return BCastSpan<WorkPartition::INTERLEAVED, IdType, SubGroup, SuperGroup, IterType> {
+      begin(), size(), subGroup, superGroup};
+  }
+
+  template <WorkPartition Policy, typename SubGroup, typename SuperGroup> DEVICE_ONLY constexpr auto
+  cooperate(const SubGroup &subGroup, const SuperGroup &superGroup) {
+    return BCastSpan<Policy, IdType, SubGroup, SuperGroup, IterType> {
       begin(), size(), subGroup, superGroup};
   }
 

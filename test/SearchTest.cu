@@ -20,7 +20,7 @@ __global__ void binarySearchKernel(T* data, size_t len, T* keys, size_t numKeys,
   const auto threadId = thisGrid.thread_rank();
 
   Span<T, void> list {data, len};
-  for (auto idx : IdRange<size_t, decltype(thisGrid)> {0, numKeys, thisGrid}) {
+  for (auto idx : IdRange<size_t, void> {0, numKeys}.cooperate(thisGrid)) {
     results[idx] = binary_search(list, keys[idx]);
   }
 }
@@ -35,7 +35,7 @@ __global__ void binarySearchCountKernel(T* data, size_t len, T* keys, size_t num
   // __shared__ int blockCount[1];
 
   Span<T, void> list {data, len};
-  for (auto idx : IdRange<size_t, decltype(thisGrid)> {0, numKeys, thisGrid}) {
+  for (auto idx : IdRange<size_t, void> {0, numKeys}.cooperate(thisGrid)) {
     if (binary_search(list, keys[idx]))
       atomicAdd(count, 1);
   }
@@ -61,7 +61,7 @@ __global__ void binarySearch2PhaseKernel(T* data, size_t len, T* keys, size_t nu
   build_cache(list, warpCache, thisWarp);
   thisWarp.sync();
 
-  for (auto idx : IdRange<size_t, decltype(thisGrid)> {0, numKeys, thisGrid}) {
+  for (auto idx : IdRange<size_t, void> {0, numKeys}.cooperate(thisGrid)) {
     results[idx] = binary_search_2phase(list, warpCache, keys[idx]);
   }
 }
@@ -78,11 +78,12 @@ __global__ void batchedBinarySearchKernel(int batchSize, T **data, size_t *dataS
   const auto gridWarps = thisGrid.num_blocks() * blockWarps;
   const auto warpId = blockId * blockWarps + thisWarp.meta_group_rank();
 
-  for (int i = warpId; i < batchSize; i += gridWarps) {
+  // for (int i = warpId; i < batchSize; i += gridWarps) {
+  for (auto i : IdRange<int, void> {0, batchSize}.cooperate<chunkedPolicy>(thisWarp, thisGrid)) {
     Span<T, void> dataSpan  {data[i], dataSizes[i]};
     Span<T, void> keySpan   {keys[i], keySizes[i]};
     Span<bool, void> resultSpan {results[i], keySizes[i]};
-    for (int keyIdx : IdRange<size_t, utils::thread_warp> {0, keySizes[i], thisWarp} ) {
+    for (int keyIdx : IdRange<size_t, void> {0, keySizes[i]}.cooperate(thisWarp)) {
       resultSpan[keyIdx] = binary_search(dataSpan, keySpan[keyIdx]);
     }
   }
@@ -105,7 +106,8 @@ __global__ void batchedBinarySearch2PhaseKernel(int batchSize, T **data, size_t 
   // int thread_lane = threadIdx.x & (WARP_SIZE-1); // thread index within the warp
   // int warp_lane   = threadIdx.x / WARP_SIZE;     // warp index within the CTA
 
-  for (int i = warpId; i < batchSize; i += gridWarps) {
+  // for (int i = warpId; i < batchSize; i += gridWarps) {
+  for (auto i : IdRange<int, void> {0, batchSize}.cooperate(thisWarp, thisGrid)) {
     Span<T, void> dataSpan  {data[i], dataSizes[i]};
     Span<T, void> keySpan   {keys[i], keySizes[i]};
     Span<bool, void> resultSpan {results[i], keySizes[i]};
@@ -114,7 +116,7 @@ __global__ void batchedBinarySearch2PhaseKernel(int batchSize, T **data, size_t 
     build_cache(dataSpan, warpCache, thisWarp);
     thisWarp.sync(); 
 
-    for (int keyIdx : IdRange<size_t, utils::thread_warp> {0, keySizes[i], thisWarp} ) {
+    for (int keyIdx : IdRange<size_t, void> {keySizes[i]}.cooperate(thisWarp) ) {
       resultSpan[keyIdx] = binary_search_2phase(dataSpan, warpCache, keySpan[keyIdx]);
     }
 
@@ -152,7 +154,7 @@ __global__ void binarySearch2PhaseCountKernel(T* data, size_t len, T* keys, size
 
   int *blockCount = smem + thisWarp.meta_group_size() * N;
 
-  for (auto idx : IdRange<size_t, decltype(thisGrid)> {0, numKeys, thisGrid}) {
+  for (auto idx : IdRange<size_t, void> {0, numKeys}.cooperate(thisGrid)) {
     if (binary_search_2phase(list, warpCache, keys[idx])) {
       atomicAdd_block(count, 1);
     }
