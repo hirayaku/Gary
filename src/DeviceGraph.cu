@@ -33,6 +33,19 @@ void DeviceGraphCtx::loadFromHost(std::shared_ptr<GraphCOO> graph, bool sorted) 
   loadFromHost(hostCSR);
 }
 
+void DeviceGraphCtx::populateDevice() {
+  if (hostCSR == nullptr)
+    throw std::runtime_error("DeviceGraphCtx is not initialized");
+  // populate CSR data
+  if (devPtr == nullptr) {
+    loadFromHost(hostCSR);
+  }
+  // populate the remaining COO data
+  if (devRowIdx == nullptr) {
+    devRowIdx = std::make_shared<thrust::device_vector<vidT>>(getHostCOO()->getRow());  
+  }
+}
+
 void DeviceGraphCtx::detachFromHost() {
   hostCSR.reset();
   hostCOO.reset();

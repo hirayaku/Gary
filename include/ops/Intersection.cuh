@@ -126,7 +126,6 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache) {
   thisWarp.sync();
 
   int threadCount = 0;
-  bool found = false;
   for (const auto key : sA.cooperate(thisWarp)) {
     threadCount += binary_search_2phase(sB, cache, key);
   }
@@ -314,36 +313,6 @@ __forceinline__ __device__ T intersect_num(T* a, T size_a, T *b, T size_b) {
     return intersect_num_bs_cache(a, size_a, b, size_b);
 }
 
-// warp-wise intersection with upper bound using binary search
-template <typename T = int32_t>
-__forceinline__ __device__ T intersect_num_bs(T *a, T size_a, T *b, T size_b, T upper_bound) {
-  if (size_a == 0 || size_b == 0) return 0;
-  int thread_lane = threadIdx.x & (WARP_SIZE-1);            // thread index within the warp
-  T num = 0;
-  auto lookup = a;
-  auto search = b;
-  auto lookup_size = size_a;
-  auto search_size = size_b;
-  if (size_a > size_b) {
-    lookup = b;
-    search = a;
-    lookup_size = size_b;
-    search_size = size_a;
-  }
-  for (auto i = thread_lane; i < lookup_size; i += WARP_SIZE) {
-    auto key = lookup[i];
-    int is_smaller = key < upper_bound ? 1 : 0;
-    int found = 0;
-    if (is_smaller && binary_search(search, key, search_size))
-      found = 1;
-    num += found;
-    unsigned active = __activemask();
-    unsigned mask = __ballot_sync(active, is_smaller);
-    if (mask != FULL_MASK) break;
-  }
-  __syncwarp();
-  return num;
-}
 
 // warp-wise intersection with upper bound using 2-phase binary search with caching
 template <typename T = int32_t>

@@ -83,6 +83,9 @@ public:
   // load host graph data (replace the current one if it exists)
   void loadFromHost(std::shared_ptr<GraphCOO> graph, bool sorted=false);
 
+  // create all formats on device
+  void populateDevice();
+
   // detach the host graph data
   void detachFromHost();
 

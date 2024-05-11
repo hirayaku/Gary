@@ -47,19 +47,36 @@ TEST(TriQueryTest, TriangleCountingSmall) {
   GTEST_LOG_(INFO) << "CPU takes " << timer.millisecs() << "ms";
 
   DeviceGraphCtx ctx(std::make_shared<GraphCSR>(std::move(csr)));
+  ctx.populateDevice();
 
   thrust::device_vector<unsigned> counts(1, 0);
-  dim3 gridDim(256);
+  dim3 gridDim(512);
   dim3 blockDim(256);
   size_t smem = graph_query::getIndexCacheSMem(blockDim, 32);
+
   utils::CUDATimer timerG("Triangle Counting");
+
+  std::fill_n(counts.begin(), counts.size(), 0);
   timerG.start();
-  graph_query::triangleCountHom<false, 32> <<<gridDim, blockDim, smem, timerG.stream()>>>(
+  graph_query::triangleCountHom<true> <<<gridDim, blockDim, smem, timerG.stream()>>>(
     { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
     thrust::raw_pointer_cast(counts.data())
   );
   timerG.stop();
-
+  checkCudaErrors(cudaGetLastError());
   GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
   GTEST_LOG_(INFO) << "kernel takes " << timerG.millisecs() << "ms";
+
+  std::fill_n(counts.begin(), counts.size(), 0);
+  timerG.start();
+  graph_query::triangleCountLegacy<<<gridDim, blockDim, 0, timerG.stream()>>>(
+    { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
+    thrust::raw_pointer_cast(counts.data())
+  );
+  timerG.stop();
+  checkCudaErrors(cudaGetLastError());
+
+  GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
+  GTEST_LOG_(INFO) << "legacy kernel takes " << timerG.millisecs() << "ms";
+
 }
