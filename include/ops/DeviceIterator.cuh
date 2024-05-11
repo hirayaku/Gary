@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <type_traits>
 #include <cooperative_groups.h>
 #include "Defines.h"
@@ -52,10 +53,11 @@ enum WorkPartition {
 static constexpr WorkPartition interleavedPolicy = WorkPartition::INTERLEAVED;
 static constexpr WorkPartition chunkedPolicy = WorkPartition::CHUNKED;
 
-// A broadcasting span which generates the same iterator for threads in the same subgroup
-// This is useful when we want to spread the supergroup-dependent inputs among subgroups
-// The execution policy is interleaved by default (span[i] goes to group[i%num_groups])
-// TODO: implement a chunked execution policy (span[i] goes to group[i/num_groups])
+// A broadcasting span which generates the same iterator for threads in the same subgroup.
+// This is useful when we want to spread the supergroup-dependent inputs among subgroups.
+// The workload partitioning policy can be:
+// - interleaved (span[i] goes to group[i%num_groups])
+// - chunked (span[i] goes to group[i/num_groups])
 template <WorkPartition Policy,
           typename T, typename SubGroup, typename SuperGroup, typename IterType=T*,
           typename = std::enable_if_t<utils::is_cooperatative_group_v<SubGroup>>,
@@ -135,6 +137,7 @@ public:
     numGroups_(superGroup.size() / subGroup.size()),
     subGroup(subGroup), superGroup(superGroup)
   {
+    assert(numGroups_ > 0);
     static_assert(Policy >= 0 && "Unsupported work partitioning policy");
   }
 };
@@ -264,7 +267,7 @@ public:
   // across the `superGroup`
   template <WorkPartition Policy, typename SubGroup, typename SuperGroup> DEVICE_ONLY auto
   cooperate(const SubGroup &subGroup, const SuperGroup &superGroup) {
-    return BCastSpan<interleavedPolicy, T, SubGroup, SuperGroup, IterType> {
+    return BCastSpan<Policy, T, SubGroup, SuperGroup, IterType> {
       ptr_, len_, subGroup, superGroup};
   }
 };

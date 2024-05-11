@@ -78,7 +78,7 @@ GraphCSR GraphCOO::toCSR_(bool sorted)  {
   }
 
   if (!sorted) {
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic)
     for (vidT vi = 0; vi < numV(); ++vi) {
       std::sort(col->begin() + rowptr[vi], col->begin() + rowptr[vi+1]);
     }
@@ -119,10 +119,10 @@ GraphCSR::ERange::ERange(const GraphCSR &graph, vidT vidMin, vidT vidMax)
   this->eidMax = rawPtr[vidMax];
 }
 
-utils::Span<std::vector<vidT>::const_iterator> GraphCSR::N(vidT vid) const {
+utils::Span<vidT> GraphCSR::N(vidT vid) const {
   // return ERange(*this, vid);
-  return utils::Span<std::vector<vidT>::const_iterator>(
-    idx->begin() + ptr->at(vid), deg->operator[](vid));
+  return utils::Span<vidT>(
+    idx->data() + ptr->at(vid), deg->operator[](vid));
 }
 
 void GraphCSR::reverse_() {
@@ -154,7 +154,7 @@ GraphCOO GraphCSR::toCOO() const {
     );
 }
 
-GraphCOO loadFromSNAP(fs::path txtFileName) {
+GraphCOO loadFromSNAP(fs::path txtFileName, bool removeSelfLoops) {
   FILE *fp = fopen(txtFileName.c_str(), "r");
   if (fp == nullptr)
     throw std::logic_error(fmt::format("Invalid SNAP file: {}", txtFileName.string()));
@@ -180,6 +180,7 @@ GraphCOO loadFromSNAP(fs::path txtFileName) {
     char *pos;
     vidT src = utils::str2int<vidT>(&line[sptr], &pos, 10);
     vidT dst = utils::str2int<vidT>(pos, nullptr, 10);
+    if (removeSelfLoops && src == dst) continue;
     if (src > maxId) maxId = src;
     if (dst > maxId) maxId = dst;
     row.push_back(src);

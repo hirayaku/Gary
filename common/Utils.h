@@ -11,12 +11,14 @@
 
 namespace utils {
 
-template<typename IterType>
+template<typename T>
 class Span {
-  IterType ptr_;
+  T *ptr_;
   std::size_t len_;
 
 public:
+  using IterType = T*;
+
   Span(IterType ptr, std::size_t len) noexcept
       : ptr_{ptr}, len_{len}
   {}
@@ -25,12 +27,20 @@ public:
       return len_;
   }
 
-  IterType begin() noexcept {
+  IterType begin() const noexcept {
       return ptr_;
   }
 
-  IterType end() noexcept {
+  IterType end() const noexcept {
       return ptr_ + len_;
+  }
+
+  T &operator[](size_t n) noexcept {
+    return ptr_[n];
+  }
+
+  const T &operator[](size_t n) const noexcept {
+    return ptr_[n];
   }
 };
 

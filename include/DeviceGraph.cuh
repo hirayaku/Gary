@@ -74,13 +74,14 @@ struct DeviceGraph {
 // Manages the graph data between host and device memory.
 class DeviceGraphCtx {
 public:
+  DeviceGraphCtx() = default;
   DeviceGraphCtx(std::shared_ptr<GraphCSR> graph);
 
   // load host graph data (replace the current one if it exists)
   void loadFromHost(std::shared_ptr<GraphCSR> graph);
 
   // load host graph data (replace the current one if it exists)
-  void loadFromHost(std::shared_ptr<GraphCOO> graph, bool sorted);
+  void loadFromHost(std::shared_ptr<GraphCOO> graph, bool sorted=false);
 
   // detach the host graph data
   void detachFromHost();
@@ -88,13 +89,15 @@ public:
   // clear device data and hostGraph
   void clear();
 
-  // create a new host graph copy from on-device data
-  // if already detached, create new host graph objects
+  // get the host graph object
+  // if already detached, create a new host graph object
   std::shared_ptr<GraphCSR> getHostCSR();
+  std::shared_ptr<GraphCOO> getHostCOO();
 
   DeviceCSR getDeviceCSR() {
+    auto csr = getHostCSR();
     return DeviceCSR {
-      hostCSR->numV(), hostCSR->numE(),
+      csr->numV(), csr->numE(),
       thrust::raw_pointer_cast(devPtr->data()),
       thrust::raw_pointer_cast(devColIdx->data()),
       thrust::raw_pointer_cast(devDeg->data())
@@ -102,10 +105,11 @@ public:
   }
 
   DeviceCOO getDeviceCOO() {
+    auto coo = getHostCOO();
     if (devRowIdx == nullptr)
-      this->devRowIdx = std::make_shared<thrust::device_vector<vidT>>(hostCOO->getRow());
+      this->devRowIdx = std::make_shared<thrust::device_vector<vidT>>(coo->getRow());
     return DeviceCOO {
-      hostCOO->numV(), hostCOO->numE(),
+      coo->numV(), coo->numE(),
       thrust::raw_pointer_cast(devRowIdx->data()),
       thrust::raw_pointer_cast(devColIdx->data()),
       thrust::raw_pointer_cast(devDeg->data())
@@ -113,10 +117,14 @@ public:
   }
 
 protected:
+  int devId = 0;
   std::shared_ptr<thrust::device_vector<eidT>> devPtr;
   std::shared_ptr<thrust::device_vector<vidT>> devRowIdx;
   std::shared_ptr<thrust::device_vector<vidT>> devColIdx;
   std::shared_ptr<thrust::device_vector<vidT>> devDeg;
   std::shared_ptr<GraphCSR> hostCSR;
   std::shared_ptr<GraphCOO> hostCOO;
+
+  // set the current CUDA device to `devId`:w
+  void makeDeviceCurrent_();
 };

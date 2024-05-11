@@ -1,24 +1,37 @@
 #include <cuda_runtime.h>
-#include <cooperative_groups.h>
+#include <cub/cub.cuh>
 #include "ops/Intersection.cuh"
 #include "kernels/GraphQueryHom.cuh"
 
 namespace graph_query {
 
-  namespace cg = cooperative_groups;
+  constexpr int BLOCK_SIZE = 256;
+  typedef cub::BlockReduce<unsigned, BLOCK_SIZE> BlockReduceU32;
 
-  __global__ void triangleQueryHom(DeviceGraph dataGraph) {
-    const auto thisGrid = cg::this_grid();
-    const auto thisBlock = cg::this_thread_block();
-    const auto blockId = thisGrid.block_rank();
-    const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
-
-    // for (vidT v0 : dataGraph.V(thisGrid))
-    // for (size_t v0 = warpId; v0 < dataGraph.numV(); v0 += warpNum) {
-    //   for (const auto v1 : dataGraph.N(v0)) {
-    //     // intersection
-    //   }
-    // }
+  size_t getIndexCacheSMem(dim3 blockDim, size_t cacheSize) {
+    return warpsPerBlock(blockDim) * cacheSize;
   }
+
+  // __global__ void __launch_bounds__(BLOCK_SIZE, 8)
+  // triangleCountLegacy(DeviceGraph dataGraph, unsigned *total) {
+  //   __shared__ typename BlockReduceU32::TempStorage temp_storage;
+  //   int thread_id = blockIdx.x * blockDim.x + threadIdx.x; // global thread index
+  //   int warp_id   = thread_id   / WARP_SIZE;               // global warp index
+  //   int num_warps = (BLOCK_SIZE / WARP_SIZE) * gridDim.x;  // total number of active warps
+  //   unsigned count = 0;
+  //   auto coo = dataGraph.coo;
+  //   auto csr = dataGraph.csr;
+  //   eidT ne = dataGraph.coo.numE();
+  //   for (eidT eid = warp_id; eid < ne; eid += num_warps) {
+  //     vidT v = coo.rowIdx[eid];
+  //     vidT u = coo.colIdx[eid];
+  //     vidT v_size = csr.getDegree(v);
+  //     vidT u_size = csr.getDegree(u);
+  //     count += intersect_num(g.N(v), v_size, g.N(u), u_size);
+  //     // intersect_bs_cache(csr.colIdx + csr.indPtr[v], v_size, csr.colIdx + csr.indPtr[u], u_size);
+  //   }
+  //   unsigned block_num = BlockReduceU32(temp_storage).Sum(count);
+  //   if (threadIdx.x == 0) atomicAdd(total, block_num);
+  // }
 
 } // namespace graph_query

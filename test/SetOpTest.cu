@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
+#include <cuda/std/atomic>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
@@ -13,8 +14,32 @@
 
 template <typename T>
 __global__ void intersectKernel(T *sA, size_t sizeA, T *sB, size_t sizeB, T *sC, size_t *sizeC) {
+  auto counter = cuda::std::atomic_ref<size_t>(*sizeC);
   Span<T, void> a {sA, sizeA}, b {sB, sizeB};
-  *sizeC = intersectBinarySearch(a, b, sC);
+  size_t threadCount = intersectBinarySearch<T, false>(a, b, sC);
+  counter.fetch_add(threadCount, cuda::std::memory_order_relaxed);
+}
+
+template <typename T, size_t N>
+__global__ void intersectWithCacheKernel(T *sA, size_t sizeA, T *sB, size_t sizeB, T *sC, size_t *sizeC) {
+  extern __shared__ T smem[];
+  auto counter = cuda::std::atomic_ref<size_t>(*sizeC);
+
+  const auto thisBlock = cg::this_thread_block();
+  const auto thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+  const auto warpIdBlock = thisWarp.meta_group_rank();
+
+  Span<T, void> a {sA, sizeA}, b {sB, sizeB};
+  Array<T, N> cache {smem + warpIdBlock * N};
+  size_t threadCount = intersectBinarySearch<T, N, false>(a, b, cache, sC);
+  counter.fetch_add(threadCount, cuda::std::memory_order_relaxed);
+}
+
+template <typename T>
+__global__ void intersectOGKernel(T *sA, size_t sizeA, T *sB, size_t sizeB, T *sC, size_t *sizeC) {
+  extern __shared__ T smem[];
+  // *sizeC = intersectBinarySearchOG(sA, sizeA, sB, sizeB, sC);
+  *sizeC = intersect_bs_cache(sA, (T)sizeA, sB, (T)sizeB, sC, smem);
 }
 
 class SetOpTest : public testing::Test {
@@ -75,14 +100,23 @@ TEST_F(SetOpTest, SimpleIntersection) {
   thrust::device_vector<int> devSetA = testSearch, devSetB = testKeys;
   thrust::device_vector<int> devSetC(std::min(sizeA, sizeB), 0);
   thrust::device_vector<size_t> sizeC(1);
+  constexpr int cacheSize = 32;
+  dim3 gridDim(1);
+  dim3 blockDim(32);
 
   utils::CUDATimer timer("intersection");
+  int smem = warpsPerBlock(blockDim) * cacheSize * sizeof(int);
   timer.start();
-  intersectKernel<int> <<<1, 32, 0, timer.stream()>>>(
+  intersectKernel<int> <<<gridDim, blockDim, 0, timer.stream()>>>(
     thrust::raw_pointer_cast(devSetA.data()), sizeA,
     thrust::raw_pointer_cast(devSetB.data()), sizeB,
     thrust::raw_pointer_cast(devSetC.data()), thrust::raw_pointer_cast(sizeC.data())
   );
+  // intersectWithCacheKernel<int, cacheSize> <<<gridDim, blockDim, smem, timer.stream()>>>(
+  //   thrust::raw_pointer_cast(devSetA.data()), sizeA,
+  //   thrust::raw_pointer_cast(devSetB.data()), sizeB,
+  //   thrust::raw_pointer_cast(devSetC.data()), thrust::raw_pointer_cast(sizeC.data())
+  // );
   timer.stop();
 
   GTEST_LOG_(INFO) << "kernel takes " << timer.microsecs() << "us";
@@ -93,5 +127,23 @@ TEST_F(SetOpTest, SimpleIntersection) {
   std::sort(out.begin(), out.begin() + sizeRef);
   for (size_t i = 0; i < sizeC[0]; ++i) {
     ASSERT_EQ(out[i], outRef[i]) << "incorrect item at index " << i;
+  }
+
+  timer.start();
+  smem = 32 * sizeof(int) * warpsPerBlock(blockDim);
+  intersectOGKernel<int> <<<gridDim, blockDim, smem, timer.stream()>>>(
+    thrust::raw_pointer_cast(devSetA.data()), sizeA,
+    thrust::raw_pointer_cast(devSetB.data()), sizeB,
+    thrust::raw_pointer_cast(devSetC.data()), thrust::raw_pointer_cast(sizeC.data())
+  );
+  timer.stop();
+  GTEST_LOG_(INFO) << "OG kernel takes " << timer.microsecs() << "us";
+
+  // verify the corretness of results
+  ASSERT_EQ(sizeC[0], sizeRef) << "incorrect sizes";
+  thrust::host_vector<int> out2 = devSetC;
+  // std::sort(out2.begin(), out2.begin() + sizeRef);
+  for (size_t i = 0; i < sizeC[0]; ++i) {
+    ASSERT_EQ(out2[i], outRef[i]) << "incorrect item at index " << i;
   }
 }

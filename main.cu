@@ -16,6 +16,7 @@ void cudaSetup(int deviceId, bool verbose) {
     cudaDeviceProp prop;
     checkCudaErrors(cudaGetDeviceProperties(&prop, deviceId));
     printf("  Compute capability: %d.%d\n", prop.major, prop.minor);
+    printf("  Compute Clock Rate: %.2f GHz\n", prop.clockRate / float(1024*1024));
     printf("  Total # SM: %d\n", prop.multiProcessorCount);
     printf("  Warp size: %d\n", prop.warpSize);
     printf("  Max # warps per block: %d\n", (prop.maxThreadsPerBlock + prop.warpSize - 1) / prop.warpSize);

@@ -10,8 +10,8 @@
 
 namespace fs = std::filesystem;
 
-void convertSNAP2Bin(fs::path input, fs::path output) {
-  GraphCOO graph = loadFromSNAP(input);
+void convertSNAP2Bin(fs::path input, fs::path output, bool keepLoops) {
+  GraphCOO graph = loadFromSNAP(input, !keepLoops);
   std::cout << fmt::format("{}: {} nodes, {} edges\n", input.string(), graph.numV(), graph.numE());
   saveToBinary(graph, output);
 }
@@ -66,10 +66,15 @@ void convertOrientCSR(fs::path input, fs::path output) {
   std::cout <<
     fmt::format("{}: {} nodes, {} edges, d_max={}\n", input.string(), graph.numV(), graph.numE(), dmax);
   }
-  auto trimmed = graph.toCOO().orientation();
+  auto trimmed = graph.toCOO().orientation().toCSR_();
   saveToBinary(trimmed, output);
+  {
+  auto &degrees = trimmed.getDegreeAll();
+  auto dmax = *std::max_element(degrees.begin(), degrees.end());
   std::cout <<
-    fmt::format("{}: {} nodes, {} edges\n", output.string(), trimmed.numV(), trimmed.numE());
+    fmt::format("{}: {} nodes, {} edges, d_max={}\n",
+      input.string(), trimmed.numV(), trimmed.numE(), dmax);
+  }
 }
 
 int main(int argc, const char *argv[])
@@ -89,11 +94,14 @@ int main(int argc, const char *argv[])
   if (getCmdLineArgumentString(argc, argv, "convert", &convert_flag))
     convert = convert_flag;
 
+  int symmetrize = getCmdLineArgumentInt(argc, argv, "symmetrize");
+  int keepLoops = getCmdLineArgumentInt(argc, argv, "keepLoops");
+
   const char *choices[] = { "snap2bin", "coo2csr", "csr2csc", "orient" };
   if (convert == choices[0]) {
-    convertSNAP2Bin(input, output);
+    convertSNAP2Bin(input, output, keepLoops);
   } else if (convert == choices[1]) {
-    convertCOO2CSR(input, output, true /*symmetrize*/);
+    convertCOO2CSR(input, output, symmetrize);
   } else if (convert == choices[2]) {
     convertCSR2CSC(input, output);
   } else if (convert == choices[3]) {

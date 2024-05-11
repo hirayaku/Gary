@@ -233,9 +233,11 @@ public:
   ERange adjBetween(vidT v1, vidT v2) const { return ERange(*this, v1, v2); }
 
   // get neighbors of node `vid`
-  utils::Span<std::vector<vidT>::const_iterator> N(vidT vid) const;
+  utils::Span<vidT> N(vidT vid) const;
 
   GraphCSR() = default;
+
+  GraphCSR(const GraphCSR &) = default;
 
   template <typename RowPtrT, typename ColIdxT>
   GraphCSR(vidT m, eidT nnz, RowPtrT &&ptr, ColIdxT &&idx)
@@ -315,4 +317,4 @@ void saveToBinary(const GraphT &graph, fs::path binFileName) {
 
 // load graph datasets from SNAP: https://snap.stanford.edu/data/index.html
 // assuming vertex ids start consecutively from 0
-GraphCOO loadFromSNAP(fs::path txtFileName);
+GraphCOO loadFromSNAP(fs::path txtFileName, bool removeSelfLoops=true);
