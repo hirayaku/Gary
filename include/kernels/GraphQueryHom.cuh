@@ -21,7 +21,7 @@ namespace graph_query {
     const auto &thisGrid = cg::this_grid();
     const auto &thisBlock = cg::this_thread_block();
     const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
-    const auto warpLane = subGroupId(thisWarp, thisBlock);
+    const auto warpLane = thisWarp.meta_group_rank();
     const int lane = thisWarp.thread_rank();
 
     unsigned threadCount = 0;
@@ -30,12 +30,12 @@ namespace graph_query {
     for (eidT eid : coo.E().cooperate(thisWarp, thisGrid)) {
       vidT src = coo.rowIdx[eid];
       vidT dst = coo.colIdx[eid];
-      Span<vidT, void> srcAdj {csr.colIdx + csr.indPtr[src], (size_t) csr.getDegree(src)};
-      Span<vidT, void> dstAdj {csr.colIdx + csr.indPtr[dst], (size_t) csr.getDegree(dst)}; 
+      Span<vidT, void> sA {csr.colIdx + csr.indPtr[src], (size_t) csr.getDegree(src)};
+      Span<vidT, void> sB {csr.colIdx + csr.indPtr[dst], (size_t) csr.getDegree(dst)};
       if constexpr (useCache) {
-        threadCount += intersectBinarySearch(srcAdj, dstAdj, cache);
+        threadCount += intersectBinarySearch(sA, sB, cache);
       } else {
-        threadCount += intersectBinarySearch(srcAdj, dstAdj);
+        threadCount += intersectBinarySearch(sA, sB);
       }
     }
     countAtomic.fetch_add(threadCount, cuda::std::memory_order_relaxed);

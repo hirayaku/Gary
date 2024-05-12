@@ -24,50 +24,56 @@ unsigned cpuTriCount(const GraphCSR &csr) {
   for (vidT v = 0; v < csr.numV(); ++v) {
     const auto vAdj = csr.N(v);
     const auto last = vAdj.size() - 1;
+    unsigned localCount = 0;
     for (auto u : vAdj) {
       const auto uAdj = csr.N(u);
       auto outEnd = std::set_intersection(uAdj.begin(), uAdj.end(),
         vAdj.begin(), vAdj.end(), spad.begin());
-      utils::atomicAdd(count, std::distance(spad.begin(), outEnd));
+      localCount += std::distance(spad.begin(), outEnd);
     }
+    utils::atomicAdd(count, localCount);
   }
   return count;
 }
 
-TEST(TriQueryTest, TriangleCountingSmall) {
+class TriQueryTest : public ::testing::Test {
+public:
+  static DeviceGraphCtx ctx;
+  static constexpr int cacheSize = 32;
+
+  static void SetUpTestCase() {
+    int deviceCount = 0;
+    checkCudaErrors(cudaGetDeviceCount(&deviceCount));
+    gpuDeviceInit(0);
+
+    auto csr = loadFromBinary<GraphCSR>("/mnt/md0/datasets/com-orkut/csr_dag.bin");
+    GTEST_LOG_(INFO) << "m=" << csr.numV() << ", nnz=" << csr.numE();
+    ctx.loadFromHost(std::make_shared<GraphCSR>(std::move(csr)));
+    ctx.populateDevice();
+  }
+
+  static void TearDownTestCase() {
+    ctx.clear();
+  }
+};
+
+DeviceGraphCtx TriQueryTest::ctx;
+
+TEST_F(TriQueryTest, RunCPU) {
   utils::Timer timer("CPU counting");
-  auto csr = loadFromBinary<GraphCSR>("/mnt/md0/datasets/com-orkut/csr_dag.bin");
-  GTEST_LOG_(INFO) << csr.numV() << " " << csr.numE();
-
   timer.start();
-  unsigned countRef = cpuTriCount(csr);
+  unsigned countRef = cpuTriCount(*ctx.getHostCSR());
   timer.stop();
-
   GTEST_LOG_(INFO) << "ref count: " << countRef;
   GTEST_LOG_(INFO) << "CPU takes " << timer.millisecs() << "ms";
+}
 
-  DeviceGraphCtx ctx(std::make_shared<GraphCSR>(std::move(csr)));
-  ctx.populateDevice();
-
+TEST_F(TriQueryTest, RunGPULegacy) {
   thrust::device_vector<unsigned> counts(1, 0);
-  dim3 gridDim(512);
+  dim3 gridDim(1024);
   dim3 blockDim(256);
-  size_t smem = graph_query::getIndexCacheSMem(blockDim, 32);
 
   utils::CUDATimer timerG("Triangle Counting");
-
-  std::fill_n(counts.begin(), counts.size(), 0);
-  timerG.start();
-  graph_query::triangleCountHom<true> <<<gridDim, blockDim, smem, timerG.stream()>>>(
-    { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
-    thrust::raw_pointer_cast(counts.data())
-  );
-  timerG.stop();
-  checkCudaErrors(cudaGetLastError());
-  GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
-  GTEST_LOG_(INFO) << "kernel takes " << timerG.millisecs() << "ms";
-
-  std::fill_n(counts.begin(), counts.size(), 0);
   timerG.start();
   graph_query::triangleCountLegacy<<<gridDim, blockDim, 0, timerG.stream()>>>(
     { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
@@ -78,5 +84,39 @@ TEST(TriQueryTest, TriangleCountingSmall) {
 
   GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
   GTEST_LOG_(INFO) << "legacy kernel takes " << timerG.millisecs() << "ms";
+}
 
+TEST_F(TriQueryTest, RunGPU) {
+  thrust::device_vector<unsigned> counts(1, 0);
+  dim3 gridDim(1024);
+  dim3 blockDim(256);
+
+  utils::CUDATimer timerG("Triangle Counting");
+  timerG.start();
+  graph_query::triangleCountHom<false> <<<gridDim, blockDim, 0, timerG.stream()>>>(
+    { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
+    thrust::raw_pointer_cast(counts.data())
+  );
+  timerG.stop();
+  checkCudaErrors(cudaGetLastError());
+  GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
+  GTEST_LOG_(INFO) << "kernel (no index cache) takes " << timerG.millisecs() << "ms";
+}
+
+TEST_F(TriQueryTest, RunGPUWithCache) {
+  thrust::device_vector<unsigned> counts(1, 0);
+  dim3 gridDim(1024);
+  dim3 blockDim(256);
+  size_t smem = graph_query::getIndexCacheSMem(blockDim, cacheSize);
+
+  utils::CUDATimer timerG("Triangle Counting");
+  timerG.start();
+  graph_query::triangleCountHom<true, cacheSize> <<<gridDim, blockDim, smem, timerG.stream()>>>(
+    { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
+    thrust::raw_pointer_cast(counts.data())
+  );
+  timerG.stop();
+  checkCudaErrors(cudaGetLastError());
+  GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
+  GTEST_LOG_(INFO) << "kernel (with index cache) takes " << timerG.millisecs() << "ms";
 }

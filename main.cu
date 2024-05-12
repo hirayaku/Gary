@@ -20,6 +20,7 @@ void cudaSetup(int deviceId, bool verbose) {
     printf("  Total # SM: %d\n", prop.multiProcessorCount);
     printf("  Warp size: %d\n", prop.warpSize);
     printf("  Max # warps per block: %d\n", (prop.maxThreadsPerBlock + prop.warpSize - 1) / prop.warpSize);
+    printf("  Max # warps per SM: %d\n", (prop.maxThreadsPerMultiProcessor + prop.warpSize - 1) / prop.warpSize);
     printf("  Total amount of shared memory per block: %lu bytes\n", prop.sharedMemPerBlock);
     printf("  Total # registers per block: %d\n", prop.regsPerBlock);
     printf("  Total amount of constant memory: %lu bytes\n", prop.totalConstMem);

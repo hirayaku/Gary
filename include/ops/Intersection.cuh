@@ -86,13 +86,14 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache, T 
   int *localCount = count + warpLane;
   if (thisWarp.thread_rank() == 0) *localCount = 0;
 
-  build_cache(sB, cache);
+  build_cache(sB, cache, thisWarp);
   thisWarp.sync();
 
   int threadCount = 0;
   bool found = false;
   for (const auto key : sA.cooperate(thisWarp)) {
     if (OutSorted) {
+      // TODO: it doesn't seem to be the correct usage of coalesced_threads()
       const auto &coalesced = cg::coalesced_threads();
       found = binary_search_2phase(sB, cache, key);
       coalesced.sync();
@@ -122,7 +123,7 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache) {
 
   const auto &thisBlock = cg::this_thread_block();
   const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
-  build_cache(sB, cache);
+  build_cache(sB, cache, thisWarp);
   thisWarp.sync();
 
   int threadCount = 0;
