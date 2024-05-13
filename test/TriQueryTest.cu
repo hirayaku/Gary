@@ -70,7 +70,7 @@ TEST_F(TriQueryTest, RunCPU) {
 
 TEST_F(TriQueryTest, RunGPULegacy) {
   thrust::device_vector<unsigned> counts(1, 0);
-  dim3 gridDim(1024);
+  dim3 gridDim(1536);
   dim3 blockDim(256);
 
   utils::CUDATimer timerG("Triangle Counting");
@@ -87,8 +87,8 @@ TEST_F(TriQueryTest, RunGPULegacy) {
 }
 
 TEST_F(TriQueryTest, RunGPU) {
-  thrust::device_vector<unsigned> counts(1, 0);
-  dim3 gridDim(1024);
+  thrust::device_vector<size_t> counts(1, 0);
+  dim3 gridDim(1536);
   dim3 blockDim(256);
 
   utils::CUDATimer timerG("Triangle Counting");
@@ -104,14 +104,32 @@ TEST_F(TriQueryTest, RunGPU) {
 }
 
 TEST_F(TriQueryTest, RunGPUWithCache) {
-  thrust::device_vector<unsigned> counts(1, 0);
-  dim3 gridDim(1024);
+  thrust::device_vector<size_t> counts(1, 0);
+  dim3 gridDim(1536);
   dim3 blockDim(256);
-  size_t smem = graph_query::getIndexCacheSMem(blockDim, cacheSize);
+  size_t smem = graph_query::getIndexCacheSMem(blockDim, cacheSize) * sizeof(vidT);
 
   utils::CUDATimer timerG("Triangle Counting");
   timerG.start();
   graph_query::triangleCountHom<true, cacheSize> <<<gridDim, blockDim, smem, timerG.stream()>>>(
+    { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
+    thrust::raw_pointer_cast(counts.data())
+  );
+  timerG.stop();
+  checkCudaErrors(cudaGetLastError());
+  GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
+  GTEST_LOG_(INFO) << "kernel (with index cache) takes " << timerG.millisecs() << "ms";
+}
+
+TEST_F(TriQueryTest, RunGPUWithCacheChunked) {
+  thrust::device_vector<size_t> counts(1, 0);
+  dim3 gridDim(1536);
+  dim3 blockDim(256);
+  size_t smem = graph_query::getIndexCacheSMem(blockDim, cacheSize) * sizeof(vidT);
+
+  utils::CUDATimer timerG("Triangle Counting");
+  timerG.start();
+  graph_query::triangleCountHom<true, cacheSize, chunkedPolicy> <<<gridDim, blockDim, smem, timerG.stream()>>>(
     { ctx.getDeviceCSR(), ctx.getDeviceCOO() },
     thrust::raw_pointer_cast(counts.data())
   );

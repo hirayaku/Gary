@@ -3,6 +3,7 @@
 #include <cooperative_groups.h>
 #include <cuda/std/atomic>
 #include "DeviceGraph.cuh"
+#include "ops/DeviceIterator.cuh"
 #include "ops/Intersection.cuh"
 
 namespace graph_query {
@@ -11,10 +12,10 @@ namespace graph_query {
 
   size_t getIndexCacheSMem(dim3 blockDim, size_t cacheSize);
 
-  template <bool useCache=true, size_t N=32>
-  __global__ void triangleCountHom(DeviceGraph dataGraph, unsigned *count) {
+  template <bool useCache=true, size_t N=32, WorkPartition Policy=interleavedPolicy>
+  __global__ void triangleCountHom(DeviceGraph dataGraph, size_t *count) {
     extern __shared__ vidT smem[];
-    auto countAtomic = cuda::std::atomic_ref<unsigned>(*count);
+    auto countAtomic = cuda::std::atomic_ref<size_t>(*count);
     DeviceCOO coo = dataGraph.coo;
     DeviceCSR csr = dataGraph.csr;
 
@@ -27,7 +28,7 @@ namespace graph_query {
     unsigned threadCount = 0;
 
     Array<vidT, N> cache {smem + N * warpLane};
-    for (eidT eid : coo.E().cooperate(thisWarp, thisGrid)) {
+    for (eidT eid : coo.E().cooperate<Policy>(thisWarp, thisGrid)) {
       vidT src = coo.rowIdx[eid];
       vidT dst = coo.colIdx[eid];
       Span<vidT, void> sA {csr.colIdx + csr.indPtr[src], (size_t) csr.getDegree(src)};
@@ -39,27 +40,6 @@ namespace graph_query {
       }
     }
     countAtomic.fetch_add(threadCount, cuda::std::memory_order_relaxed);
-
-    // auto countAtomic = cuda::std::atomic_ref<unsigned>(*count);
-    // __shared__ vidT cache[256];
-    // int thread_id = blockIdx.x * blockDim.x + threadIdx.x; // global thread index
-    // int warp_id   = thread_id   / WARP_SIZE;               // global warp index
-    // int num_warps = (256 / WARP_SIZE) * gridDim.x;  // total number of active warps
-    // unsigned tcount = 0;
-    // auto coo = dataGraph.coo;
-    // auto csr = dataGraph.csr;
-    // eidT ne = dataGraph.coo.numE();
-    // for (eidT eid = warp_id; eid < ne; eid += num_warps) {
-    //   vidT v = coo.rowIdx[eid];
-    //   vidT u = coo.colIdx[eid];
-    //   vidT v_size = csr.getDegree(v);
-    //   vidT u_size = csr.getDegree(u);
-    //   tcount += intersect_bs_cache(
-    //     csr.colIdx + csr.indPtr[v], v_size,
-    //     csr.colIdx + csr.indPtr[u], u_size, cache
-    //   );
-    // }
-    // countAtomic.fetch_add(tcount, cuda::std::memory_order_relaxed);
   }
 
   // legacy implementation of triangle counting
