@@ -34,9 +34,9 @@ namespace graph_query {
       Span<vidT, void> sA {csr.colIdx + csr.indPtr[src], (size_t) csr.getDegree(src)};
       Span<vidT, void> sB {csr.colIdx + csr.indPtr[dst], (size_t) csr.getDegree(dst)};
       if constexpr (useCache) {
-        threadCount += intersectBinarySearch(sA, sB, cache);
+        threadCount += intersect(sA, sB, cache);
       } else {
-        threadCount += intersectBinarySearch(sA, sB);
+        threadCount += intersect(sA, sB);
       }
     }
     countAtomic.fetch_add(threadCount, cuda::std::memory_order_relaxed);

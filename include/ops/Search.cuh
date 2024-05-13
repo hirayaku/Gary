@@ -108,6 +108,12 @@ build_cache(Span<T, void> list, Array<S, N> &indexCache, const CudaGroup &group)
     indexCache[i] = list[i * size / N];
 }
 
+template <typename T, size_t N, typename CudaGroup, typename S=std::remove_cv_t<T>> inline DEVICE_ONLY void
+fill_cache(Array<S, N> &indexCache, T val, const CudaGroup &group) {
+  for (auto i : IdRange<int, void>(N).cooperate(group))
+    indexCache[i] = val;
+}
+
 // thread-sequential binary search with a shared index cache
 // *indexCache.begin() should be the first item in list
 // *(indexCache.end() - 1) should be the last item in list

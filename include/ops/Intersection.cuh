@@ -1,5 +1,7 @@
 #pragma once
 #include <cooperative_groups.h>
+#include <cooperative_groups/memcpy_async.h>
+#include <cuda/std/limits>
 #include <thrust/swap.h>
 #include "Defines.h"
 #include "ops/Search.cuh"
@@ -7,14 +9,13 @@
 
 namespace cg = cooperative_groups;
 
-// Intersetion of two sorted span using binary seach.
+// Intersection of two sorted span using binary seach.
 // Returns the size of intersection and appends the results to `out`.
 // The results could be left unsorted, which is slightly faster.
 // Returns **per-thread** count of the intersection
 // (warp-cooperative implementation)
 template <typename T = vidT, bool OutSorted=true> inline DEVICE_ONLY int
 intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, T *out) {
-  if (sA.size() == 0 || sB.size() == 0) return 0;
   if (sA.size() > sB.size()) {
     thrust::swap(sA, sB);
   }
@@ -47,13 +48,12 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, T *out) {
   return threadCount;
 }
 
-// Intersetion of two sorted span using binary seach.
+// Intersection of two sorted span using binary seach.
 // This method only computes the size of results.
 // Returns **per-thread** count of the intersection
 // (warp-cooperative implementation)
 template <typename T = vidT> inline DEVICE_ONLY int
 intersectBinarySearch(Span<T, void> sA, Span<T, void> sB) {
-  if (sA.size() == 0 || sB.size() == 0) return 0;
   if (sA.size() > sB.size()) {
     thrust::swap(sA, sB);
   }
@@ -69,12 +69,11 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB) {
   return threadCount;
 }
 
-// Intersetion of two sorted span using binary seach with a small index cache
+// Intersection of two sorted span using binary seach with a small index cache
 // Returns **per-thread** count of the intersection
 // (warp-cooperative implementation)
 template <typename T = vidT, size_t N, bool OutSorted=true> inline DEVICE_ONLY int
 intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache, T *out) {
-  if (sA.size() == 0 || sB.size() == 0) return 0;
   if (sA.size() > sB.size()) {
     thrust::swap(sA, sB);
   }
@@ -94,6 +93,7 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache, T 
   for (const auto key : sA.cooperate(thisWarp)) {
     if (OutSorted) {
       // TODO: it doesn't seem to be the correct usage of coalesced_threads()
+      // we need a mask for the last iteration
       const auto &coalesced = cg::coalesced_threads();
       found = binary_search_2phase(sB, cache, key);
       coalesced.sync();
@@ -110,13 +110,12 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache, T 
   return threadCount;
 }
 
-// Intersetion of two sorted span using binary seach with a small index cache.
+// Intersection of two sorted span using binary seach with a small index cache.
 // This method only computes the size of results.
 // Returns **per-thread** count of the intersection
 // (warp-cooperative implementation)
 template <typename T = vidT, size_t N> inline DEVICE_ONLY int
 intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache) {
-  if (sA.size() == 0 || sB.size() == 0) return 0;
   if (sA.size() > sB.size()) {
     thrust::swap(sA, sB);
   }
@@ -134,14 +133,67 @@ intersectBinarySearch(Span<T, void> sA, Span<T, void> sB, Array<T, N> &cache) {
   return threadCount;
 }
 
-// Intersetion of two sorted span using merge.
+// Intersection of sorted spans when the first span `sA` fits into `spad`
 // (warp-cooperative implementation)
+// NOTE: for this function to generate meaningful speedups, we need
+// - async memcpy
+// - early termination
 template <typename T = vidT, size_t N> inline DEVICE_ONLY int
-intersectMerge(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad, T *out) {
-  if (sA.size() == 0 || sB.size() == 0) return 0;
+intersectSmall(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
+  if (sA.size() > sB.size()) {
+    thrust::swap(sA, sB);
+  }
+
+  int threadCount = 0;
   const auto &thisBlock = cg::this_thread_block();
   const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
-  const auto &warpLane = subGroupId(thisWarp, thisBlock);
+
+  // initialize spad from sA
+  cg::memcpy_async(thisWarp, spad.begin(), sA.begin(), sA.size());
+  cg::wait(thisWarp);
+
+  Span<T, void> spadA(spad.begin(), sA.size());
+  const T lastA = spadA[sA.size()-1];
+  for (const auto key: sB.cooperate(thisWarp)) {
+    if (key > lastA) break;
+    threadCount += binary_search(spadA, key);
+  }
+  return threadCount;
+}
+
+static constexpr unsigned floorLog2(unsigned x){
+    return x == 1 ? 0 : 1+floorLog2(x >> 1);
+}
+
+// Intersection of two large sorted spans using merge.
+// (warp-cooperative implementation)
+template <typename T = vidT, size_t N, bool OutSorted=true> inline DEVICE_ONLY int
+intersectMergeLarge(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
+  // const auto &thisBlock = cg::this_thread_block();
+  // const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+  // int posA = 0, posB = 0;
+  // auto begin = reinterpret_cast<std::uintptr_t>(sA.begin()) >> floorLog2(sizeof(T));
+  // auto aligned = (begin >> floorLog2(N)) << floorLog2(N);
+  return 0;
+}
+
+// Take insersection of two sorted span and returns the result size.
+// There are several cases:
+// - they are both small (fits into spad)
+// - one of them is small, the other is large
+// - both of them are large but sizes are skewed
+// - both of them are large and sizes are relatively even
+template <typename T = vidT, size_t N> inline DEVICE_ONLY int
+intersect(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
+  if (sA.size() == 0 || sB.size() == 0) return 0;
+  if (sA.size() <= N || sB.size() <= N) return intersectSmall(sA, sB, spad);
+  return intersectBinarySearch(sA, sB, spad);
+}
+
+template <typename T = vidT> inline DEVICE_ONLY int
+intersect(Span<T, void> sA, Span<T, void> sB) {
+  if (sA.size() == 0 || sB.size() == 0) return 0;
+  return intersectBinarySearch(sA, sB);
 }
 
 /*
@@ -180,7 +232,7 @@ intersectBinarySearchOG(T* a, int size_a, T* b, int size_b, T* c) {
 }
 */
 
-// warp-wise intersetion of two lists using the 2-phase binary seach algorithm with caching
+// warp-wise intersection of two lists using the 2-phase binary seach algorithm with caching
 // Returns **per-warp** count of the intersection
 template <typename T = int32_t>
 __forceinline__ __device__ T intersect_bs_cache(T* a, T size_a, T* b, T size_b, T* c, T* cache) {

@@ -39,7 +39,7 @@ unsigned cpuTriCount(const GraphCSR &csr) {
 class TriQueryTest : public ::testing::Test {
 public:
   static DeviceGraphCtx ctx;
-  static constexpr int cacheSize = 32;
+  static constexpr int cacheSize = 256;
 
   static void SetUpTestCase() {
     int deviceCount = 0;
