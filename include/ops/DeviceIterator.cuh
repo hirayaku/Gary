@@ -16,12 +16,12 @@ namespace utils {
     std::is_same_v<thread_warp, std::remove_cv_t<CudaGroup>>;
 }
 
-static inline HOST_DEVICE int warpsPerBlock(dim3 blockDim) {
+static CUDA_INLINE HOST_DEVICE int warpsPerBlock(dim3 blockDim) {
   return blockDim.x * blockDim.y * blockDim.z / WARP_SIZE;
 }
 
 template <typename SubGroup, typename SuperGroup>
-static inline DEVICE_ONLY size_t subGroupId(const SubGroup &sub, const SuperGroup &super) {
+static CUDA_INLINE DEVICE_ONLY size_t subGroupId(const SubGroup &sub, const SuperGroup &super) {
   return super.thread_rank() / sub.size();
 }
 

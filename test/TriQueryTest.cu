@@ -39,13 +39,15 @@ unsigned cpuTriCount(const GraphCSR &csr) {
 class TriQueryTest : public ::testing::Test {
 public:
   static DeviceGraphCtx ctx;
-  static constexpr int cacheSize = 256;
+  static constexpr int cacheSize = 32;
+  static ssize_t countRef;
 
   static void SetUpTestCase() {
     int deviceCount = 0;
     checkCudaErrors(cudaGetDeviceCount(&deviceCount));
     gpuDeviceInit(0);
 
+    // auto csr = loadFromBinary<GraphCSR>("/mnt/md0/datasets/com-friendster/csr_dag.bin");
     auto csr = loadFromBinary<GraphCSR>("/mnt/md0/datasets/com-orkut/csr_dag.bin");
     GTEST_LOG_(INFO) << "m=" << csr.numV() << ", nnz=" << csr.numE();
     ctx.loadFromHost(std::make_shared<GraphCSR>(std::move(csr)));
@@ -58,17 +60,20 @@ public:
 };
 
 DeviceGraphCtx TriQueryTest::ctx;
+ssize_t TriQueryTest::countRef = -1;
 
 TEST_F(TriQueryTest, RunCPU) {
   utils::Timer timer("CPU counting");
   timer.start();
-  unsigned countRef = cpuTriCount(*ctx.getHostCSR());
+  countRef = cpuTriCount(*ctx.getHostCSR());
   timer.stop();
   GTEST_LOG_(INFO) << "ref count: " << countRef;
   GTEST_LOG_(INFO) << "CPU takes " << timer.millisecs() << "ms";
 }
 
 TEST_F(TriQueryTest, RunGPULegacy) {
+  if (countRef == -1) countRef = cpuTriCount(*ctx.getHostCSR());
+
   thrust::device_vector<unsigned> counts(1, 0);
   dim3 gridDim(1536);
   dim3 blockDim(256);
@@ -84,9 +89,12 @@ TEST_F(TriQueryTest, RunGPULegacy) {
 
   GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
   GTEST_LOG_(INFO) << "legacy kernel takes " << timerG.millisecs() << "ms";
+  ASSERT_EQ(counts[0], countRef);
 }
 
 TEST_F(TriQueryTest, RunGPU) {
+  if (countRef == -1) countRef = cpuTriCount(*ctx.getHostCSR());
+
   thrust::device_vector<size_t> counts(1, 0);
   dim3 gridDim(1536);
   dim3 blockDim(256);
@@ -104,6 +112,8 @@ TEST_F(TriQueryTest, RunGPU) {
 }
 
 TEST_F(TriQueryTest, RunGPUWithCache) {
+  if (countRef == -1) countRef = cpuTriCount(*ctx.getHostCSR());
+
   thrust::device_vector<size_t> counts(1, 0);
   dim3 gridDim(1536);
   dim3 blockDim(256);
@@ -119,9 +129,12 @@ TEST_F(TriQueryTest, RunGPUWithCache) {
   checkCudaErrors(cudaGetLastError());
   GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
   GTEST_LOG_(INFO) << "kernel (with index cache) takes " << timerG.millisecs() << "ms";
+  ASSERT_EQ(counts[0], countRef);
 }
 
 TEST_F(TriQueryTest, RunGPUWithCacheChunked) {
+  if (countRef == -1) countRef = cpuTriCount(*ctx.getHostCSR());
+
   thrust::device_vector<size_t> counts(1, 0);
   dim3 gridDim(1536);
   dim3 blockDim(256);
@@ -137,4 +150,5 @@ TEST_F(TriQueryTest, RunGPUWithCacheChunked) {
   checkCudaErrors(cudaGetLastError());
   GTEST_LOG_(INFO) << "count: " << thrust::host_vector<unsigned>(counts)[0];
   GTEST_LOG_(INFO) << "kernel (with index cache) takes " << timerG.millisecs() << "ms";
+  ASSERT_EQ(counts[0], countRef);
 }

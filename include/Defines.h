@@ -16,6 +16,10 @@ constexpr int WARP_SIZE = 32;
 constexpr int MAX_WARPS_PER_BLOCK = 32;
 constexpr int FULL_MASK = 0xFFFFFFFF;
 
+#ifndef CUDA_INLINE
+#define CUDA_INLINE __forceinline__
+#endif
+
 #ifndef HOST_DEVICE
 #define HOST_DEVICE __host__ __device__
 #endif

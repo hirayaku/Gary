@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cooperative_groups.h>
 #include <cooperative_groups/memcpy_async.h>
 #include <cuda/std/limits>
@@ -149,11 +150,12 @@ intersectSmall(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
   const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
 
   // initialize spad from sA
-  cg::memcpy_async(thisWarp, spad.begin(), sA.begin(), sA.size());
+  thisWarp.sync();
+  cg::memcpy_async(thisWarp, spad.begin(), sA.begin(), sA.size() * sizeof(T));
+  Span<T, void> spadA(spad.begin(), sA.size());
+  const T lastA = sA[sA.size()-1];
   cg::wait(thisWarp);
 
-  Span<T, void> spadA(spad.begin(), sA.size());
-  const T lastA = spadA[sA.size()-1];
   for (const auto key: sB.cooperate(thisWarp)) {
     if (key > lastA) break;
     threadCount += binary_search(spadA, key);
@@ -168,12 +170,12 @@ static constexpr unsigned floorLog2(unsigned x){
 // Intersection of two large sorted spans using merge.
 // (warp-cooperative implementation)
 template <typename T = vidT, size_t N, bool OutSorted=true> inline DEVICE_ONLY int
-intersectMergeLarge(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
-  // const auto &thisBlock = cg::this_thread_block();
-  // const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
+intersectMerge(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
+  const auto &thisBlock = cg::this_thread_block();
+  const auto &thisWarp = cg::tiled_partition<WARP_SIZE>(thisBlock);
   // int posA = 0, posB = 0;
   // auto begin = reinterpret_cast<std::uintptr_t>(sA.begin()) >> floorLog2(sizeof(T));
-  // auto aligned = (begin >> floorLog2(N)) << floorLog2(N);
+  // auto beginAligned = (begin >> floorLog2(N)) << floorLog2(N);
   return 0;
 }
 
@@ -186,7 +188,7 @@ intersectMergeLarge(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
 template <typename T = vidT, size_t N> inline DEVICE_ONLY int
 intersect(Span<T, void> sA, Span<T, void> sB, Array<T, N> &spad) {
   if (sA.size() == 0 || sB.size() == 0) return 0;
-  if (sA.size() <= N || sB.size() <= N) return intersectSmall(sA, sB, spad);
+  // if (sA.size() <= N || sB.size() <= N) return intersectSmall(sA, sB, spad);
   return intersectBinarySearch(sA, sB, spad);
 }
 
