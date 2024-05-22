@@ -70,7 +70,7 @@ template <typename T> struct LeadingZerosCounter<T, 4> {
     if (Val == 0)
       return 32;
  
-#if __has_builtin(__builtin_clz) || defined(__GNUC__)
+#if defined(__GNUC__)
     return __builtin_clz(Val);
 #elif defined(_MSC_VER)
     unsigned long Index;
@@ -86,7 +86,7 @@ template <typename T> struct LeadingZerosCounter<T, 8> {
     if (Val == 0)
       return 64;
  
-#if __has_builtin(__builtin_clzll) || defined(__GNUC__)
+#if defined(__GNUC__)
     return __builtin_clzll(Val);
 #elif defined(_MSC_VER)
     unsigned long Index;

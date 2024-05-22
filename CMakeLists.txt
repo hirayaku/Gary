@@ -6,7 +6,9 @@ endif()
 
 project(GraphM LANGUAGES CUDA CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
+find_package(Filesystem REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(OpenMP REQUIRED)
 # find_package(spdlog REQUIRED)
@@ -18,7 +20,7 @@ target_compile_features(utils PUBLIC cxx_std_17 cuda_std_17)
 
 add_library(graphm SHARED src/Graph.cpp src/DeviceGraph.cu src/GraphQueryHom.cu)
 target_include_directories(graphm PUBLIC include)
-target_link_libraries(graphm PUBLIC OpenMP::OpenMP_CXX CUDA::cudart rmm::rmm)
+target_link_libraries(graphm PUBLIC std::filesystem OpenMP::OpenMP_CXX CUDA::cudart rmm::rmm)
 target_link_libraries(graphm PUBLIC fmt::fmt cereal::cereal utils)
 target_compile_features(graphm PUBLIC cxx_std_17 cuda_std_17)
 target_compile_options(graphm PRIVATE
